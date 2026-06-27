@@ -1,0 +1,25 @@
+{
+  "name": "Universal Packaging ERP",
+  "short_name": "UP ERP",
+  "description": "Universal Packaging Production Intelligence System",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#1f6feb",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='20' fill='%231f6feb'/><text y='140' x='20' font-size='130' font-family='sans-serif'>\ud83c\udfed</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='48' fill='%231f6feb'/><text y='380' x='40' font-size='360' font-family='sans-serif'>\ud83c\udfed</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "gcm_sender_id": "945586402394"
+}
