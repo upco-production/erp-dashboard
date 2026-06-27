@@ -19772,10 +19772,12 @@ async function requestPushPermission(){
 }
 
 // ── SAVE TOKEN TO APPS SCRIPT ─────────────────────────────────
+// ── FCM PROXY URL (Cloudflare Worker) ────────────────────────
+var FCM_PROXY_URL = 'https://up-erp-fcm.admin-upco.workers.dev';
+
 async function saveTokenToServer(token, user){
-  var url = (typeof APP !== 'undefined' && APP.settings && APP.settings.appScriptUrl)
-    ? APP.settings.appScriptUrl
-    : null;
+  var url = FCM_PROXY_URL || ((typeof APP !== 'undefined' && APP.settings && APP.settings.appScriptUrl)
+    ? APP.settings.appScriptUrl : null);
   if(!url || !token) return;
 
   try{
@@ -19802,8 +19804,8 @@ async function unregisterToken(){
   var token = FCM_TOKEN || localStorage.getItem(FCM_TOKEN_KEY);
   if(!token) return;
 
-  var url = (typeof APP !== 'undefined' && APP.settings && APP.settings.appScriptUrl)
-    ? APP.settings.appScriptUrl : null;
+  var url = FCM_PROXY_URL || ((typeof APP !== 'undefined' && APP.settings && APP.settings.appScriptUrl)
+    ? APP.settings.appScriptUrl : null);
   if(url){
     try{
       await fetch(url, {
@@ -19876,8 +19878,8 @@ navigator.serviceWorker && navigator.serviceWorker.addEventListener('message', f
 // event: one of the 8 maintenance events
 // data:  { reqId, dept, type, priority, description, targetRoles, targetUsers }
 async function sendPush(event, data){
-  var url = (typeof APP !== 'undefined' && APP.settings && APP.settings.appScriptUrl)
-    ? APP.settings.appScriptUrl : null;
+  var url = FCM_PROXY_URL || ((typeof APP !== 'undefined' && APP.settings && APP.settings.appScriptUrl)
+    ? APP.settings.appScriptUrl : null);
   if(!url) return;
 
   var payload = Object.assign({
