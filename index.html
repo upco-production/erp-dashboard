@@ -10878,26 +10878,18 @@ function sseGetOpenMonths(){
     const months = window.ppGetOpenMonths();
     if(months && months.length) return months;
   }
-  // Fallback: use current month
   return [APP.currentMonth || 'Jun-26'];
 }
 
-// Convert month key 'Jun-26' → fromDate '2026-06-01'
+// PERMANENT FIX: fromDate always = 6 months back from TODAY
+// Completely independent of open/locked status
+// Locked months are READ-ONLY for charts — no editing allowed
 function sseMonthToFromDate(months){
-  const MMAP = {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
-  let earliest = null;
-  months.forEach(function(mk){
-    const parts = mk.split('-');
-    if(parts.length < 2) return;
-    const mNum = MMAP[parts[0]];
-    const yr   = 2000 + parseInt(parts[1], 10);
-    if(!mNum || isNaN(yr)) return;
-    const d = new Date(yr, mNum - 1, 1);
-    if(!earliest || d < earliest) earliest = d;
-  });
-  if(!earliest) return '';
-  return earliest.getFullYear() + '-' +
-         String(earliest.getMonth()+1).padStart(2,'0') + '-01';
+  // Ignore months param — always fetch 6 months back
+  var d = new Date();
+  d.setMonth(d.getMonth() - 6);
+  d.setDate(1);
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-01';
 }
 
 // Load frozen data from localStorage
@@ -10987,7 +10979,7 @@ function showSyncPopup(){
     <div style="padding:8px 0">
       <div style="font-size:12px;color:var(--text3);margin-bottom:12px">
         Open months: <b>${openMonths.join(', ')}</b> &nbsp;|&nbsp; From: <b>${fromDate}</b><br>
-        Locked months are cached locally - only open months will be fetched.
+        Fetching last 6 months of data. Locked months shown as read-only in charts.
       </div>
       <div style="display:grid;gap:8px">
         ${DEPT_OPTIONS.map(d=>`
@@ -11019,7 +11011,9 @@ window.sseRunSync = async function(dept, fromDate){
       // Then all INCHARGE (open months only)
       const rows = await sseFetchDept('ALL', fromDate);
       sseApplyRows(rows);
-      debugLog('ok','SSE ALL sync done', rows.length+' rows (open months)');
+      debugLog('ok','SSE ALL sync done', rows.length+' rows (6 months)');
+      // Save to SDC so locked months stay in charts after re-lock
+      if(typeof sdcSave==='function') try{ sdcSave(APP.productionData); }catch(e){}
     } else {
       // Single dept
       const rows = await sseFetchDept(dept, fromDate);
