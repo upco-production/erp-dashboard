@@ -9622,51 +9622,37 @@ function getSourceUrl(params={}){
   return u.toString();
 }
 async function erpApi(params={}, body=null){
-  // Always POST to avoid CORS issues with GET requests
-  // Apps Script v4.1: POST with action in body, GET params merged into body
+  // USE GET with query params — POST body is lost on Apps Script 302 redirect
   const ERP_FIXED_URL = 'https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec';
-  const postBody = Object.assign({}, params, body||{});
-  // Route to correct v4.1 action
+  const p = Object.assign({}, params, body||{});
   const SYSTEM_ID = '1_wS3PPXn2YM8hlKQipPhrH1ere4s2wvda-1ETAG1fFM';
-  postBody.tab       = postBody.tab || postBody.sheetName || postBody.tabName || '';
-  postBody.headerRow = postBody.headerRow || 3;
-  if(!postBody.action) postBody.action = 'readsystem';
-  // SYSTEM_MASTER reads
-  if(postBody.sheetId === SYSTEM_ID || postBody.source === 'SYSTEM_MASTER') {
-    postBody.action = 'readsystem';
-  }
-  // If dept set, use read action
-  if(postBody.dept && postBody.dept !== 'SYSTEM_MASTER') {
-    postBody.action = 'read';
-  }
-  // For INCHARGE sheets, use read action with dept
-  const INCHARGE_DEPT_MAP = {
-    '1qB9ort3sX3P0fiqyaP2WxEF9KcYwlpIZGWOfn_fxKVs': 'PRINTING',
-    '143EJbfmkpp9XNtfZDot5ydac_Xth8YTHR0iqNWTqSYw': 'INK',
-    '16jILdm69JA-bIJdMuxi4pR6o3qlBJ4z_qNFLrifhxFc': 'LAMINATION',
-    '1Q53yyK6YFTRDq1Fazd6CYHS-4yTczX2OLJCL9cL9_c8': 'SLITTING',
-    '1i26Svbmc-zD4Ul1CkY4RXOTT4ldbCnHGHWEjB7mMirA': 'BAG_MAKING',
-    '1bGNAfSe6L1OlyWP9YfgGE1C3TLXKWTR9Y-BGOMEJyzU': 'QUALITY',
-    '12aZX2Pz0J-sb1s8psnBOs30Dlud1WkYFDXlXtXU03eE': 'DISPATCH',
-    '1KNIVZ5vMtcHJ8UZijXwP8MZ0xi6z5ndR47oBo4viwhs': 'FG'
+  p.tab = p.tab || p.sheetName || p.tabName || '';
+  p.headerRow = p.headerRow || 3;
+  if(!p.action) p.action = 'readsystem';
+  if(p.sheetId === SYSTEM_ID || p.source === 'SYSTEM_MASTER') p.action = 'readsystem';
+  if(p.dept && p.dept !== 'SYSTEM_MASTER') p.action = 'read';
+  const INCHARGE_MAP = {
+    '1qB9ort3sX3P0fiqyaP2WxEF9KcYwlpIZGWOfn_fxKVs':'PRINTING',
+    '143EJbfmkpp9XNtfZDot5ydac_Xth8YTHR0iqNWTqSYw':'INK',
+    '16jILdm69JA-bIJdMuxi4pR6o3qlBJ4z_qNFLrifhxFc':'LAMINATION',
+    '1Q53yyK6YFTRDq1Fazd6CYHS-4yTczX2OLJCL9cL9_c8':'SLITTING',
+    '1i26Svbmc-zD4Ul1CkY4RXOTT4ldbCnHGHWEjB7mMirA':'BAG_MAKING',
+    '1bGNAfSe6L1OlyWP9YfgGE1C3TLXKWTR9Y-BGOMEJyzU':'QUALITY',
+    '12aZX2Pz0J-sb1s8psnBOs30Dlud1WkYFDXlXtXU03eE':'DISPATCH',
+    '1KNIVZ5vMtcHJ8UZijXwP8MZ0xi6z5ndR47oBo4viwhs':'FG'
   };
-  if(postBody.sheetId && INCHARGE_DEPT_MAP[postBody.sheetId]) {
-    postBody.action = 'read';
-    postBody.dept   = INCHARGE_DEPT_MAP[postBody.sheetId];
-  }
-  debugLog('info','API POST', postBody.action + (postBody.tab ? '/'+postBody.tab : '') + (postBody.dept ? '/'+postBody.dept : ''));
+  if(p.sheetId && INCHARGE_MAP[p.sheetId]){ p.action='read'; p.dept=INCHARGE_MAP[p.sheetId]; }
+  const url = new URL(ERP_FIXED_URL);
+  Object.entries(p).forEach(([k,v])=>{ if(v!==undefined && v!=='') url.searchParams.set(k,String(v)); });
+  url.searchParams.set('_', Date.now());
+  debugLog('info','API GET', p.action+(p.tab?'/'+p.tab:'')+(p.dept?'/'+p.dept:''));
   try{
-    const r = await fetch(ERP_FIXED_URL, {
-      method : 'POST',
-      headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body   : JSON.stringify(postBody),
-      cache  : 'no-store'
-    });
+    const r = await fetch(url.toString(), {cache:'no-store', redirect:'follow'});
     const text = await r.text();
     if(!r.ok) throw new Error('HTTP '+r.status+' '+text.slice(0,160));
     try{ return JSON.parse(text); }catch(e){ throw new Error('Invalid JSON: '+text.slice(0,160)); }
   }catch(e){
-    throw new Error('erpApi failed: '+e.message);
+    throw new Error('erpApi GET failed: '+e.message);
   }
 }
 function rowsFromResponse(json, key){
@@ -9742,12 +9728,7 @@ async function syncAllSheets(){
 
   // 2. Production — all INCHARGE sheets in one call
   try{
-    const res = await fetch(_erpUrl,{
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify({action:'read',dept:'ALL'}),
-      cache:'no-store'
-    });
+    const res = await fetch(_erpUrl+'?action=read&dept=ALL&_='+Date.now(),{cache:'no-store',redirect:'follow'});
     const data = await res.json();
     if(data.ok && data.rows && data.rows.length){
       const rows = data.rows;
@@ -10706,7 +10687,8 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
   async function readTab(sourceKey, tab, headerRow){
     const source = V4.sheets[sourceKey];
     const _postBody={action:'read', sheetId:source.id, spreadsheetId:source.id, sheetName:tab, tab:tab, headerRow:headerRow, dept:(source.dept||'')};
-    const res=await fetch('https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(_postBody),cache:'no-store'});
+    const _rtUrl=new URL('https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec'); Object.entries(_postBody).forEach(([k,v])=>{ if(v!==undefined&&v!=='') _rtUrl.searchParams.set(k,String(v)); }); _rtUrl.searchParams.set('_',Date.now());
+    const res=await fetch(_rtUrl.toString(),{cache:'no-store',redirect:'follow'});
     const txt=await res.text();
     let json; try{ json=JSON.parse(txt); }catch(e){ throw new Error('Non-JSON Apps Script response for '+tab+': '+txt.slice(0,120)); }
     if(json && json.ok===false) throw new Error(json.error||('Apps Script read failed for '+tab));
@@ -10928,7 +10910,7 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
       }catch(e){ APP.postingPeriods=APP.postingPeriods||[]; log('warn','POSTING_PERIOD_MASTER skipped',e.message); }
       // Fetch ALL INCHARGE sheets in one call → set production data
       try{
-        const _eres=await fetch('https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'read',dept:'ALL'}),cache:'no-store'});
+        const _eres=await fetch('https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec?action=read&dept=ALL&_='+Date.now(),{cache:'no-store',redirect:'follow'});
         const _edata=await _eres.json();
         const _allRows=(_edata.ok&&_edata.rows)?_edata.rows:[];
         log('ok','INCHARGE/ALL',_allRows.length+' rows');
@@ -19052,7 +19034,7 @@ async function fetchRowsForDate(tabName, isoDate){
   });
   if(!url) throw new Error('Apps Script URL not configured');
 
-  var res  = await fetch('https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec', {method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'read',_url:url}),cache:'no-store'});
+  var res  = await fetch(url, {cache:'no-store', redirect:'follow'});
   var text = await res.text();
   var json;
   try{ json = JSON.parse(text); }catch(e){ throw new Error('Invalid JSON: '+text.slice(0,80)); }
@@ -19074,7 +19056,7 @@ async function fetchRowsForDate(tabName, isoDate){
       sheetName: tabName,
       headerRow: 5
     });
-    var fullRes  = await fetch('https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec', {method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'read',_url:fullUrl}),cache:'no-store'});
+    var fullRes  = await fetch(fullUrl, {cache:'no-store', redirect:'follow'});
     var fullText = await fullRes.text();
     var fullJson = JSON.parse(fullText);
     var allRows  = Array.isArray(fullJson) ? fullJson
