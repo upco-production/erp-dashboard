@@ -2849,7 +2849,7 @@ function renderDeptDailyTab(tc, dept){
   });
   const sorted = Object.values(byDate).sort((a,b)=>a.rawDate<b.rawDate?-1:1);
 
-  function dispProd(pk){ return isBag?(pk/1e6).toFixed(2)+' M PCS':pk.toFixed(1)+' KG'; }
+  function dispProd(pk){ return isBag?Math.round(pk).toLocaleString()+' PCS':pk.toFixed(1)+' KG'; }
   function dispMeter(m){ return (m/1e6).toFixed(2)+' Mn M'; }
 
   function jobDetailRows(rows){
@@ -8367,7 +8367,7 @@ function buildDeptRequirementKPIs(dept,data){
   const isBag=dept==='Bag Making';
   // Production: Bag Making → M PCS; all others → Tons (÷1000)
   const prodValue=isBag?(prod/1000000).toFixed(2)+' M':(prod/1000).toFixed(2)+' T';
-  const prodLabel=isBag?'PRODUCTION M PCS':'PRODUCTION TONS';
+  const prodLabel=isBag?'PRODUCTION PCS':'PRODUCTION TONS';
   // Meters: always in Millions
   const metersVal=(meters/1e6).toFixed(2)+' Mn M';
   return `<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
@@ -8397,7 +8397,7 @@ function machineAgg(dept,data){
     const waste   = sum(md,'waste');
     const dt      = md.reduce((a,r)=>a+deptTechDowntime(r),0);
     // productionTons: Bag Making → M PCS (÷1e6); others → Tons (÷1000)
-    const productionTons = dept==='Bag Making' ? prod/1e6 : prod/1000;
+    const productionTons = dept==='Bag Making' ? prod : prod/1000; // BM: actual PCS, others: Tons
     const masterEntry = APP.machines.find(m=>m.code===code);
     return {code, display:deptMachineDisplay(code,dept), records:md,
             production:prod, productionTons, waste, downtime:dt,
@@ -8415,7 +8415,7 @@ function renderMachineCards(dept,data){
       ${machines.map(m=>{
         const rep=machineReplacementMetric(dept,m.records,m.jobSetting);
         const prodDisplay=isBag?m.productionTons.toFixed(2)+' M':m.productionTons.toFixed(2)+' T';
-        const prodLabel=isBag?'Production (M PCS)':'Production (Tons)';
+        const prodLabel=isBag?'Production (PCS)':'Production (Tons)';
         const meters=m.records.reduce((a,r)=>a+(+r.productionMeter||+r.PRODUCTION_METER||0),0);
         const metersDisp=(meters/1e6).toFixed(2)+' Mn M';
         const wp=m.production>0?(m.waste/m.production*100):0;
@@ -8476,7 +8476,7 @@ renderDeptPage=function(container,dept){
   const eeA=avg(data,'ee');
   const oeeA=avg(data,'oee');
   const meters=data.reduce((a,r)=>a+(+r.productionMeter||+r.PRODUCTION_METER||0),0);
-  const dispProd=isBag?(prod/1e6).toFixed(2)+' M PCS':(prod/1000).toFixed(2)+' T';
+  const dispProd=isBag?Math.round(prod).toLocaleString()+' PCS':(prod/1000).toFixed(2)+' T';
   const dispM=(meters/1e6).toFixed(2)+' Mn M';
   const prev=APP.productionData.filter(x=>x.month===getPrevMonth(APP.currentMonth)&&x.dept===dept);
   const chg=sum(prev,'production')>0?((prod-sum(prev,'production'))/sum(prev,'production')*100):0;
@@ -8510,7 +8510,7 @@ switchDeptTab=function(tab,el,dept){
     const wasteP=prod>0?(waste/prod*100):0; const dt=sum(data,'downtime');
     const eeA=avg(data,'ee'); const oeeA=avg(data,'oee');
     const meters=data.reduce((a,r)=>a+(+r.productionMeter||+r.PRODUCTION_METER||0),0);
-    const dispProd=isBag?(prod/1e6).toFixed(2)+' M PCS':(prod/1000).toFixed(2)+' T';
+    const dispProd=isBag?Math.round(prod).toLocaleString()+' PCS':(prod/1000).toFixed(2)+' T';
     const dispM=(meters/1e6).toFixed(2)+' Mn M';
     const prev=APP.productionData.filter(x=>x.month===getPrevMonth(APP.currentMonth)&&x.dept===dept);
     const chg=sum(prev,'production')>0?((prod-sum(prev,'production'))/sum(prev,'production')*100):0;
@@ -12062,7 +12062,7 @@ navigate = (function(orig){
     const isBag=dept==='Bag Making';
     // Production: Bag Making → M PCS; all others → Tons (÷1000)
     const prodValue=isBag?(prod/1000000).toFixed(2)+' M':(prod/1000).toFixed(2)+' T';
-    const prodLabel=isBag?'PRODUCTION M PCS':'PRODUCTION TONS';
+    const prodLabel=isBag?'PRODUCTION PCS':'PRODUCTION TONS';
     // Meters in Millions
     const metersVal=(meters/1e6).toFixed(2)+' Mn M';
     const wasteCard = dept==='Printing'
