@@ -15000,7 +15000,7 @@ function isAdmin(){
 function isTech(){
   if(typeof window.isTechnicalTeam==='function'&&window.isTechnicalTeam()) return true;
   const r=String(APP?.currentUser?.role||'').trim().toUpperCase();
-  if(/^TECH_(MECHANICAL|ELECTRICAL|UTILITIES)$/.test(r)) return true;
+  // Only real technical roles in this system
   if(/^(MECH|ELEC|UTIL)_INCHARGE$/.test(r)) return true;
   if(r==='TECH_MANAGER'||r==='TECH_UTILITY') return true;
   return false;
@@ -15044,16 +15044,14 @@ function userDeptScope(){
 }
 
 // Get the maintenance TYPE this technical user is scoped to (null = see all types)
-// PM requests go to MECHANICAL team
+// Roles: MECH_INCHARGE, ELEC_INCHARGE, UTIL_INCHARGE, TECH_MANAGER, TECH_UTILITY
+// PM requests → MECHANICAL team
 function techTypeScope(){
   const r = curRole();
-  if(r === 'MECH_INCHARGE')    return 'ME';
-  if(r === 'ELEC_INCHARGE')    return 'EE';
-  if(r === 'UTIL_INCHARGE')    return 'UT';
-  if(r === 'TECH_MECHANICAL')  return 'ME';
-  if(r === 'TECH_ELECTRICAL')  return 'EE';
-  if(r === 'TECH_UTILITIES')   return 'UT';
-  if(r === 'TECH_UTILITY')     return 'UT';
+  if(r === 'MECH_INCHARGE') return 'ME';
+  if(r === 'ELEC_INCHARGE') return 'EE';
+  if(r === 'UTIL_INCHARGE') return 'UT';
+  if(r === 'TECH_UTILITY')  return 'UT';
   if(r === 'TECH_MANAGER'){
     const dept = String(APP?.currentUser?.dept||'').trim().toUpperCase();
     if(dept === 'MECHANICAL') return 'ME';
@@ -15148,22 +15146,33 @@ function canStage3(r){
   return false;
 }
 // Can this user fill Stage 4 (technical action report)?
-function canStage4(r){ return isAdmin()||(isTech()&&g(r,'assignedToUser')===curUser()); }
+// Entire technical team of matching type can fill Stage 4 (not just who accepted)
+function canStage4(r){
+  if(isAdmin()) return true;
+  if(!isTech()) return false;
+  const tScope = techTypeScope();
+  if(!tScope) return false;
+  const reqType = String(g(r,'type')||'').trim().toUpperCase();
+  const PM_ALIASES = {ME:['ME','MECHANICAL','PM'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
+  return (PM_ALIASES[tScope]||[]).indexOf(reqType) > -1;
+}
 // Can this user confirm/lock (Stage 5)?
-// TECH_MANAGER of matching dept confirms (ME/EE/UT + PM→ME)
+// TECH_MANAGER (all depts) + TECH_UTILITY (UT requests only)
 function canStage5(r){
   if(isAdmin()) return true;
   const role = curRole();
   const reqType = String(g(r,'type')||'').trim().toUpperCase();
-  const pmAliases = {ME:['ME','MECHANICAL','PM'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
-  if(role==='TECH_MANAGER'){
-    const dept = String(APP?.currentUser?.dept||'').trim().toUpperCase();
-    const myType = dept==='MECHANICAL'?'ME':dept==='ELECTRICAL'?'EE':(dept==='UTILITY'||dept==='UTILITIES')?'UT':null;
-    return myType && (pmAliases[myType]||[]).indexOf(reqType)>-1;
+  const PM_ALIASES = {ME:['ME','MECHANICAL','PM'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
+  // TECH_MANAGER — confirms own dept type
+  if(role === 'TECH_MANAGER'){
+    const tScope = techTypeScope();
+    return tScope && (PM_ALIASES[tScope]||[]).indexOf(reqType) > -1;
   }
-  // Legacy: MECH/ELEC/UTIL_INCHARGE also confirm (Stage 5)
-  const it = inchargeTeam();
-  return it && (pmAliases[it]||[]).indexOf(reqType)>-1;
+  // TECH_UTILITY — confirms UT requests only
+  if(role === 'TECH_UTILITY'){
+    return (PM_ALIASES['UT']||[]).indexOf(reqType) > -1;
+  }
+  return false;
 }
 
 function roleLabel(role){
@@ -15441,7 +15450,13 @@ function updateBadge(){
     if(['LOCKED','CLOSED'].includes(st)) return false;
     // show badge items relevant to current role
     if(isAdmin()) return true;
-    if(isTech()){ const tr=roleToTypeCode(curRole()); return g(r,'type')===tr&&['OPEN','PENDING','ACCEPTED'].includes(st); }
+    if(isTech()){
+      const tScope=techTypeScope();
+      const PM_ALIASES={ME:['ME','MECHANICAL','PM'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
+      const reqType=String(g(r,'type')||'').trim().toUpperCase();
+      const typeMatch=tScope&&(PM_ALIASES[tScope]||[]).indexOf(reqType)>-1;
+      return typeMatch&&['OPEN','ACCEPTED','IN_PROGRESS'].includes(st);
+    }
     if(isIncharge()){ const it=inchargeTeam(); return (!it||g(r,'type')===it)&&st==='PENDING_REVIEW'; }
     return ['OPEN','ACCEPTED','IN_PROGRESS','PENDING_REVIEW'].includes(st);
   }).length;
@@ -15972,15 +15987,22 @@ window.submitMaintRequest=async function(){
       // ME requests -> MECH_INCHARGE, TECH_MECHANICAL, TECH_MANAGER(MECHANICAL)
       // EE requests -> ELEC_INCHARGE, TECH_ELECTRICAL, TECH_MANAGER(ELECTRICAL)
       // UT requests -> UTIL_INCHARGE, TECH_UTILITIES, TECH_UTILITY
-      // PM notifications go to MECHANICAL team
+      // New request → notify matching tech team only (by request type)
+      // PM → MECHANICAL team
       const _typeRoleMap={
-        'ME':['MECH_INCHARGE','TECH_MECHANICAL','TECH_MANAGER'],
-        'EE':['ELEC_INCHARGE','TECH_ELECTRICAL','TECH_MANAGER'],
-        'UT':['UTIL_INCHARGE','TECH_UTILITIES','TECH_UTILITY','TECH_MANAGER'],
-        'PM':['MECH_INCHARGE','TECH_MECHANICAL','TECH_MANAGER']
+        'ME':['MECH_INCHARGE','TECH_MANAGER'],
+        'EE':['ELEC_INCHARGE','TECH_MANAGER'],
+        'UT':['UTIL_INCHARGE','TECH_UTILITY','TECH_MANAGER'],
+        'PM':['MECH_INCHARGE','TECH_MANAGER']
       };
       const _tRoles=_typeRoleMap[String(typeCode||type||'').toUpperCase()]||[];
-      _fcmPush('newRequest', _newRow, {status:'OPEN', targetRoles:_tRoles, reqDept:dept, reqType:typeCode||type});
+      _fcmPush('newRequest', _newRow, {
+        status:'OPEN',
+        targetRoles:_tRoles,
+        reqDept:dept,
+        reqType:typeCode||type,
+        description:desc.substring(0,80)
+      });
     }
     if(typeof window.sendBrowserNotif==='function')
       window.sendBrowserNotif('🔧 New Request ['+priority+']',dept+' / '+type+': '+desc.substring(0,60),'mr-'+id);
@@ -16089,7 +16111,7 @@ function _actionBtn(r){
       return `<button class="btn btn-primary btn-sm" onclick="window.acceptMaintRequest('${g(r,'id')}')">✅ Accept</button>
               <button class="btn btn-danger btn-sm" onclick="window.openRejectModal('${g(r,'id')}')">❌ Reject</button>`;
   }
-  if(isTech()&&g(r,'assignedToUser')===curUser()&&st==='IN_PROGRESS')
+  if(canStage4(r)&&st==='IN_PROGRESS')
     return `<button class="btn btn-primary btn-sm" onclick="window.openMaintStage4('${g(r,'id')}')">📝 File Report</button>`;
   if(canStage3(r)&&st==='ACCEPTED')
     return `<button class="btn btn-primary btn-sm" onclick="window.openMaintStage3('${g(r,'id')}')">🕐 Log Times</button>`;
@@ -16178,7 +16200,7 @@ function _buildRows(reqs){
               return '<button class="btn btn-primary btn-sm" onclick="window.acceptMaintRequest(\'${id}\')">✅ Accept</button>'
                     +'<button class="btn btn-danger btn-sm" onclick="window.openRejectModal(\'${id}\')">❌ Reject</button>';
           }
-          if(isTech()&&_mt&&g(r,'type')===_mt&&['ACCEPTED','IN_PROGRESS'].includes(_st))
+          if(canStage4(r)&&['ACCEPTED','IN_PROGRESS'].includes(_st))
             return '<button class="btn btn-primary btn-sm" onclick="window.openMaintStage4(\'${id}\')">📝 Report</button>';
           if(isIncharge()&&_st==='PENDING_REVIEW')
             return '<button class="btn btn-primary btn-sm" onclick="window.openMaintConfirm(\'${id}\')">✅ Confirm</button>';
@@ -16358,7 +16380,17 @@ window.acceptMaintRequest=async function(id){
     await apiPost('maintenanceProgress',{tab:TAB_PROG,row:prog});
     APP.maintenanceProgress.push(prog); cacheProg(); cacheReqs(); updateBadge();
     toast('✅ '+(g(r,'notifNo')||id)+' accepted. Response time: '+respMin+' min','success');
-    _fcmPush('accepted', r, {status:'ACCEPTED'});
+    // Accepted → notify production dept who raised it + MANAGER
+    const _accDept = String(g(r,'dept')||'');
+    const _deptRoleMap={'Printing':['PRINTING_INCHARGE','PRINTING_SHIFT_INCHARGE'],
+      'Lamination':['LAMINATION_INCHARGE','LAMINATION_SHIFT_INCHARGE'],
+      'Slitting':['SLITTING_INCHARGE','SLITTING_SHIFT_INCHARGE'],
+      'Bag Making':['BAG_MAKING_INCHARGE','BAG_MAKING_SHIFT_INCHARGE']};
+    _fcmPush('accepted', r, {
+      status:'ACCEPTED',
+      targetRoles:(_deptRoleMap[_accDept]||[]).concat(['MANAGER','DIRECTOR']),
+      reqDept:_accDept
+    });
     renderMaintQueue();
   }catch(e){
     cacheReqs(); APP.maintenanceProgress.push(prog); cacheProg(); updateBadge();
@@ -16408,7 +16440,18 @@ window.confirmReject=async function(id){
     await apiPost('maintenanceProgress',{tab:TAB_PROG,row:prog});
     APP.maintenanceProgress.push(prog); cacheProg(); cacheReqs(); updateBadge();
     document.getElementById('maint-rej-overlay')?.remove();
-    _fcmPush('rejected', r, {status:'REJECTED'});
+    // Rejected → notify production dept who raised it + MANAGER
+    const _rejDept = String(g(r,'dept')||'');
+    const _deptRoleMap2={'Printing':['PRINTING_INCHARGE','PRINTING_SHIFT_INCHARGE'],
+      'Lamination':['LAMINATION_INCHARGE','LAMINATION_SHIFT_INCHARGE'],
+      'Slitting':['SLITTING_INCHARGE','SLITTING_SHIFT_INCHARGE'],
+      'Bag Making':['BAG_MAKING_INCHARGE','BAG_MAKING_SHIFT_INCHARGE']};
+    _fcmPush('rejected', r, {
+      status:'REJECTED',
+      targetRoles:(_deptRoleMap2[_rejDept]||[]).concat(['MANAGER','DIRECTOR']),
+      targetUsers:[g(r,'submittedByUser')].filter(Boolean),
+      reqDept:_rejDept
+    });
     toast((g(r,'notifNo')||id)+' rejected. Submitter will be notified.','success');
     renderMaintQueue();
   }catch(e){
@@ -16611,8 +16654,19 @@ window.saveStage4=async function(id){
     APP.maintenanceProgress.push(prog); cacheProg(); cacheReqs(); updateBadge();
     document.getElementById('maint-s4-overlay')?.remove();
     toast('Stage 4 report submitted - Incharge notified for review','success');
-    // FCM: notify dept (Printing/Lam etc.) who raised the request + MANAGER
-    _fcmPush('techComplete', r, {status:'PENDING_REVIEW'});
+    // Tech complete → notify production dept who raised it + MANAGER + TECH_MANAGER
+    // "Your machine is fixed, please verify"
+    const _tcDept = String(g(r,'dept')||'');
+    const _deptRoleMap3={'Printing':['PRINTING_INCHARGE','PRINTING_SHIFT_INCHARGE'],
+      'Lamination':['LAMINATION_INCHARGE','LAMINATION_SHIFT_INCHARGE'],
+      'Slitting':['SLITTING_INCHARGE','SLITTING_SHIFT_INCHARGE'],
+      'Bag Making':['BAG_MAKING_INCHARGE','BAG_MAKING_SHIFT_INCHARGE']};
+    _fcmPush('techComplete', r, {
+      status:'PENDING_REVIEW',
+      targetRoles:(_deptRoleMap3[_tcDept]||[]).concat(['MANAGER','DIRECTOR','TECH_MANAGER']),
+      targetUsers:[g(r,'submittedByUser')].filter(Boolean),
+      reqDept:_tcDept
+    });
     renderMaintQueue();
   }catch(e){
     cacheReqs(); APP.maintenanceProgress.push(prog); cacheProg(); updateBadge();
@@ -16719,7 +16773,14 @@ window.saveStage5=async function(id,action){
     await apiPost('maintenanceProgress',{tab:TAB_PROG,row:prog});
     APP.maintenanceProgress.push(prog); cacheProg(); cacheReqs(); updateBadge();
     document.getElementById('maint-s5-overlay')?.remove();
-    if(action==='CONFIRM') _fcmPush('confirmed', r, {status:'CONFIRMED'});
+    if(action==='CONFIRM'){
+      // Confirmed/Locked → notify requester + MANAGER
+      _fcmPush('confirmed', r, {
+        status:'CONFIRMED',
+        targetRoles:['MANAGER','DIRECTOR'],
+        targetUsers:[g(r,'submittedByUser')].filter(Boolean)
+      });
+    }
     toast(action==='CONFIRM'?(g(r,'notifNo')||id)+' LOCKED - record is now permanent':'Sent back for correction','success');
     renderMaintQueue();
   }catch(e){
