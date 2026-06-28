@@ -1505,15 +1505,20 @@ function renderDashboard(container) {
     return rows.reduce((a,r)=>a+prodKg(r),0) / 1000;
   }
   function bagPcsForMonth(m=month){
-    // Use getMonthData (same as Bag Making dept page) - respects active date filter
     const rows = (m === month)
       ? getMonthData('Bag Making')
       : (APP.productionData||[]).filter(r => r.month===m && r.dept==='Bag Making');
-    return rows.reduce((a,r)=>{
-      // ONLY use PRODUCTION_PCS — never scan keys (avoids picking up WASTAGE_IN_PCS etc.)
-      const v = n(r.PRODUCTION_PCS || r.productionPcs || r.production || 0);
-      return a + v;
-    },0);
+    return rows
+      .filter(r => {
+        // Only count rows with valid PRODUCTION_DATE matching this month
+        const d = String(r.PRODUCTION_DATE || r.date || '');
+        if(!d || d.length < 7) return false;
+        const rowMonth = upDateToMonthKey(d);
+        return rowMonth === m;
+      })
+      .reduce((a,r)=>{
+        return a + (+(r.PRODUCTION_PCS || r.productionPcs || 0));
+      },0);
   }
   // Your DISPATCH_MASTER has ONE quantity column - DISPATCHED (KG) - and
   // category is derived from PLANT/TYPE (Export / UF / UP or blank).
@@ -8051,21 +8056,36 @@ function monthIndex(mon){ return MP_MONTHS.indexOf(mon); }
 function keyFromISO(iso){ const d=new Date(iso+'T00:00:00'); return MP_MONTHS[d.getMonth()]+'-'+String(d.getFullYear()).slice(2); }
 function recordDateISO(r){
   const raw = r.PRODUCTION_DATE || r.date || r.DATE || '';
-  if(/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  const mk=parseMonthKey(r.month||APP.currentMonth); const mi=monthIndex(mk.mon);
+  // Full ISO date — use directly
+  if(/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0,10);
+  // ISO with T — slice to date part
+  if(/^\d{4}-\d{2}-\d{2}T/.test(raw)) return raw.slice(0,10);
+  // No valid date AND no valid month → return empty (row excluded from filters)
+  const mon = r.month || '';
+  if(!mon || mon.length < 5) return '';
+  // Fall back to month key only if row has explicit month field
+  const mk=parseMonthKey(mon); const mi=monthIndex(mk.mon);
+  if(!mk || mi < 0) return '';
   let day=1;
   const m = String(raw).match(/(\d{1,2})$/); if(m) day=Math.max(1,Math.min(31,+m[1]));
   return `${mk.year}-${String(mi+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
 }
 function inActiveDateFilter(r){
   const iso=recordDateISO(r);
+  if(!iso) return false;  // no valid date → exclude from all filters
   if(FILTER_STATE.type==='month') return (r.month||keyFromISO(iso))===APP.currentMonth;
   if(FILTER_STATE.type==='day') return iso===FILTER_STATE.dateFrom;
   if(FILTER_STATE.type==='range') return iso>=FILTER_STATE.dateFrom && iso<=FILTER_STATE.dateTo;
   return true;
 }
 getMonthData = function(dept){
-  return APP.productionData.filter(r=>(!dept||r.dept===dept) && inActiveDateFilter(r));
+  return APP.productionData.filter(r=>{
+    if(dept && r.dept!==dept) return false;
+    if(!inActiveDateFilter(r)) return false;
+    // Must have valid PRODUCTION_DATE
+    const d = String(r.PRODUCTION_DATE||r.date||'');
+    return d && d.length>=7;
+  });
 };
 getInkData = function(month){
   return APP.inkData.filter(r=>!r.type && (month ? r.month===month : inActiveDateFilter(r)));
@@ -10239,7 +10259,7 @@ function upDateToMonthKey(v){
   if(m1) return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(m1[2])-1]+'-'+m1[1].slice(2);
   const m2=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
   if(m2){ const yy=m2[3].length===2?('20'+m2[3]):m2[3]; return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(m2[2])-1]+'-'+yy.slice(2); }
-  return keyFromISO ? (keyFromISO(s)||APP.currentMonth) : APP.currentMonth;
+  return '';  // unparseable date → empty (row excluded from filters)
 }
 normalizeUserRow = function(r){
   const n=upObjectNormalizeKeys(r);
