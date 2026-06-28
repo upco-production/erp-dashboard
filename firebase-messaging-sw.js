@@ -85,17 +85,20 @@ function buildNotification(d, n) {
 
   // Body: structured like the mockup
   const lines = [];
-  // @Username first — short and clear
-  if (requestedBy) lines.push('@' + requestedBy + ' — ' + (dept||''));
-  // Description (short)
-  if (desc) lines.push(desc.slice(0, 80) + (desc.length > 80 ? '…' : ''));
+  lines.push(eventLine);
+  if (desc) lines.push('');
+  if (desc) lines.push(desc.slice(0, 120) + (desc.length > 120 ? '…' : ''));
   lines.push('');
-  // Key info only — no Type
   if (priority || status)
-    lines.push(priority + '  |  ' + status);
-  if (machine)
-    lines.push(machine + '  |  ' + fmtDatetime(submittedAt));
-  lines.push('Tap to open in ERP →');
+    lines.push('Priority: ' + (priority||'-') + '    Status: ' + (status||'-'));
+  if (dept || machine)
+    lines.push('Dept: ' + (dept||'-') + '    Machine: ' + (machine||'-'));
+  if (submittedAt)
+    lines.push('Date & Time: ' + fmtDatetime(submittedAt));
+  if (requestedBy)
+    lines.push('Requested By: @' + requestedBy);
+  lines.push('');
+  lines.push('Tap to view request details in ERP →');
 
   return { title, body: lines.join('\n') };
 }
@@ -116,18 +119,24 @@ messaging.onBackgroundMessage(function(payload) {
   // Deep link: open ERP on maintenance tab
   const deepLink = ERP_URL + '/index.html#maintenance' + (reqId ? '?req=' + reqId : '');
 
+  // Check silent mode flag sent from ERP
+  var isSilent = d.silent === 'true' || d.silent === true;
+
   const options = {
     body,
     icon : '/icon-192.png',
     badge: '/icon-72.png',
     tag  : reqId || ('maint-' + Date.now()),
-    // CRITICAL stays on screen until dismissed (like WhatsApp calls)
-    requireInteraction: priority === 'CRITICAL' || event === 'newRequest',
-    vibrate: priority === 'CRITICAL' ? [200,100,200,100,200] : [200,100,200],
+    // CRITICAL stays on screen until dismissed
+    requireInteraction: !isSilent && (priority === 'CRITICAL' || event === 'newRequest'),
+    // Silent mode: no sound, no vibration — notification still appears on lock screen
+    silent : isSilent,
+    vibrate: isSilent ? [] : (priority === 'CRITICAL' ? [200,100,200,100,200] : [200,100,200]),
     data: {
-      url  : deepLink,
-      reqId: reqId,
-      event: event,
+      url   : deepLink,
+      reqId : reqId,
+      event : event,
+      silent: isSilent,
     },
     actions: [
       { action: 'queue',   title: '📋 My Queue'    },
