@@ -4923,9 +4923,13 @@ function jptRenderWIP(allPlanRows){
 // ── WIP Charts ────────────────────────────────────────────────────────────
 function jptDrawWIPChart(allPlanRows){
   const raw=APP.wipData||[];
-  const _sk=s=>{const u=String(s||'').toUpperCase().replace(/\s+/g,' ');
-    return u===''||u==='UNKNOWN'||u==='DISPATCH READY'||u==='DISPATCHED';};
-  const rows=raw.map(normWIPRow).filter(r=>r.order&&r.order!=='0'&&!_sk(r.currentStage));
+  // Same filter as WIP tab — use ORDER_STATUS not CURRENT_STAGE
+  const _WIP_ST=new Set(['IN PROGRESS','IN PROGESS','ON HOLD','HOLD','COMPLETED']);
+  const rows=raw.map(normWIPRow).filter(r=>{
+    if(!r.order||r.order==='0') return false;
+    const st=String(r.status||'').toUpperCase().replace(/\s+/g,' ').trim();
+    return _WIP_ST.has(st);
+  });
   const opts={responsive:true,maintainAspectRatio:false,
     plugins:{legend:{display:false},upValueLabels:{unit:''}},
     scales:{x:{ticks:{color:'#6e7681',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}},
