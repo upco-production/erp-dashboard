@@ -1510,16 +1510,9 @@ function renderDashboard(container) {
       ? getMonthData('Bag Making')
       : (APP.productionData||[]).filter(r => r.month===m && r.dept==='Bag Making');
     return rows.reduce((a,r)=>{
-      let v = n(r.production || r.productionPcs || r.PRODUCTION_PCS || 0);
-      if(!v){
-        for(const k of Object.keys(r)){
-          const ku=String(k).toUpperCase();
-          if((ku.includes('PCS')||ku.includes('PIECE')||ku.includes('BAGS')||ku.includes('POUCHES'))&&!ku.includes('WASTE')&&!ku.includes('PCT')){
-            const nv=n(r[k]); if(nv>0){v=nv;break;}
-          }
-        }
-      }
-      return a+v;
+      // ONLY use PRODUCTION_PCS — never scan keys (avoids picking up WASTAGE_IN_PCS etc.)
+      const v = n(r.PRODUCTION_PCS || r.productionPcs || r.production || 0);
+      return a + v;
     },0);
   }
   // Your DISPATCH_MASTER has ONE quantity column - DISPATCHED (KG) - and
@@ -1880,8 +1873,8 @@ function showRecord(id){
       ${detailRow('Machine',r.machine)} ${detailRow('SAP SFG No',r.sapSFG||'-')}
       ${detailRow('SAP PO',r.sapPO)} ${detailRow('Job Name',r.job)}
       ${detailRow('Customer',r.customer)} ${detailRow('Department',r.dept)}
-      ${detailRow('Production',r.dept==='Bag Making'?(r.production/1000000).toFixed(2)+'M PCS':r.production+' Tons')}
-      ${detailRow('Production (KG est.)',r.dept==='Bag Making'?(r.production*0.12).toFixed(0)+' KG':(r.production*1000).toFixed(0)+' KG')}
+      ${detailRow('Production',r.dept==='Bag Making'?Math.round(r.production).toLocaleString()+' PCS':r.production+' Tons')}
+      ${detailRow('Production KG',r.dept==='Bag Making'?Math.round(r.productionKg||r.PRODUCTION_KG||0).toLocaleString()+' KG':(r.production*1000).toFixed(0)+' KG')}
       ${detailRow('Waste KG',r.waste+' KG')} ${detailRow('Waste %',r.wastePercent+'%')}
       ${detailRow('Total Downtime (min)',r.downtime+' min')} ${detailRow('Downtime (hours)',(r.downtime/60).toFixed(2)+' h')}
       ${detailRow('EE %',`<span style="color:${r.ee>=75?'var(--green)':'var(--yellow)'}">${Number(r.ee||0).toFixed(2)}%</span>`)}
@@ -2955,7 +2948,7 @@ function renderDeptEETab(tc, dept){
   const isBagMaking = dept==='Bag Making';
   // For Bag Making: production in M PCS; for others: tons
   const prodTrend=isBagMaking
-    ? months6.map(m=>+(APP.productionData.filter(x=>x.month===m&&x.dept===dept).reduce((a,r)=>a+(+(r.production||r.productionPcs||r.PRODUCTION_PCS||0)),0)/1e6).toFixed(2))
+    ? months6.map(m=>+(APP.productionData.filter(x=>x.month===m&&x.dept===dept).reduce((a,r)=>a+(+(r.PRODUCTION_PCS||r.productionPcs||r.production||0)),0)/1e6).toFixed(2))
     : months6.map(m=>+(APP.productionData.filter(x=>x.month===m&&x.dept===dept).reduce((a,r)=>a+(+(r.productionKg||r.production||0)/1000),0)).toFixed(2));
   const prodByMachine=isBagMaking
     ? machines.map(m=>+(m.records.reduce((a,r)=>a+(+(r.production||r.productionPcs||r.PRODUCTION_PCS||0)),0)/1e6).toFixed(2))
@@ -10239,7 +10232,7 @@ rowsFromResponse = function(json, key, tabName){
 };
 normKeyRow = function(r){ return upObjectNormalizeKeys(r); };
 function upDateToMonthKey(v){
-  if(!v) return APP.currentMonth;
+  if(!v) return '';  // empty date → no month (row will be filtered out)
   if(v instanceof Date && !isNaN(v)) return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][v.getMonth()]+'-'+String(v.getFullYear()).slice(2);
   const s=String(v).trim();
   const m1=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
