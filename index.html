@@ -4028,18 +4028,26 @@ function jptLamBadges(p){
 // ── Force refresh planning data ──────────────────────────────────────────
 window.jptForceRefresh = async function(){
   const btn=document.getElementById('jpt-refresh-btn');
-  if(btn){btn.disabled=true;btn.textContent='🔄 Syncing Planning Data...';}
+  if(btn){btn.disabled=true;btn.textContent='🔄 Syncing...';}
   try{
+    // 1. Sync Planning
     let data=await window.syncOneSource('PLANNING_ORDER_MASTER');
     if(!Array.isArray(data)||!data.length){
-      // Fallback: full sync (also refreshes planning)
       await syncAllSheets();
       data=APP.planningData||[];
     } else {
       APP.planningData=data;
       try{localStorage.setItem('upc_planning_v2',JSON.stringify(data));}catch(e){}
     }
-    toast('Planning data refreshed — '+(APP.planningData||[]).length+' orders loaded','success');
+    // 2. Auto-sync WIP after Planning (WIP depends on Planning orders)
+    try{
+      const wipData=await window.syncOneSource('WIP_MATERIAL_MASTER');
+      if(Array.isArray(wipData)&&wipData.length){
+        APP.wipData=wipData;
+        debugLog('ok','WIP auto-refreshed after Planning',wipData.length+' rows');
+      }
+    }catch(e){ debugLog('warn','WIP auto-refresh failed',e.message); }
+    toast('Planning + WIP refreshed — '+(APP.planningData||[]).length+' orders','success');
     // Re-render whichever JPT tab is active
     const tc=document.getElementById('jpt-tab-content');
     const activeTab=document.querySelector('#jpt-tabs .tab.active');
