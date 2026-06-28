@@ -17913,7 +17913,8 @@ function normFG(r){
   const matGroup     = String(v('MATERIAL_GROUP') ?? v('I') ?? '').trim();
   const totalKg      = N('TOTAL_KG') || N('J');
   const factor       = N('FACTOR') || N('K');
-  const customer     = String(v('CUSTOMER') ?? v('L') ?? '').trim() || 'No Customer Mentioned';
+  const customerRaw  = v('CUSTOMER') ?? v('L') ?? '';
+  const customer     = String(customerRaw === null || customerRaw === undefined ? '' : customerRaw).trim() || 'No Customer Mentioned';
 
   // No separate PCS/METER column in this sheet — use unrestricted stock
   const pcsMtrValue  = null;
@@ -18064,7 +18065,7 @@ window.refreshFGStock = async function(forceRefresh){
 // -- Build the full FG Stock UI --------------------------------------------
 function renderFGBody(body, rows){
   const totalKg    = rows.reduce((a,r)=>a+r.totalKg,0);
-  const customers  = [...new Set(rows.map(r=>r.customer))].sort((a,b)=>{
+  const customers  = [...new Set(rows.map(r=>r.customer).filter(Boolean))].sort((a,b)=>{
     // Always show "No Customer Mentioned" last
     if(a==='No Customer Mentioned') return 1;
     if(b==='No Customer Mentioned') return -1;
@@ -18094,12 +18095,12 @@ function renderFGBody(body, rows){
       <select id="fg-customer-filter" onchange="window.filterFGTable()"
         style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none">
         <option value="">All Customers</option>
-        ${customers.map(c=>`<option value="${c.replace(/"/g,'&quot;')}">${c}</option>`).join('')}
+        ${customers.filter(Boolean).map(c=>`<option value="${String(c).replace(/"/g,'&quot;')}">${c}</option>`).join('')}
       </select>
       <select id="fg-storage-filter" onchange="window.filterFGTable()"
         style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none">
         <option value="">All Storage Locations</option>
-        ${locations.map(l=>`<option value="${l.replace(/"/g,'')}">${l}</option>`).join('')}
+        ${locations.filter(Boolean).map(l=>`<option value="${String(l).replace(/"/g,'')}">${l}</option>`).join('')}
       </select>
       <span id="fg-row-count" style="font-size:11px;color:var(--text3);margin-left:4px"></span>
     </div>
