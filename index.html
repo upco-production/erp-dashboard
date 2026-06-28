@@ -518,7 +518,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
     </div>
     <div class="login-error" id="login-error">Invalid username or password</div>
     <button class="login-btn" onclick="doLogin()">Login</button>
-    <button class="btn btn-outline" style="width:100%;margin-top:10px" onclick="typeof preLoginSyncDiagnostics==='function'?preLoginSyncDiagnostics():alert('Page load ho rahi hai, thoda wait karo')">Test Sheet Connection / Load Users</button>
+    <button class="btn btn-outline" style="width:100%;margin-top:10px" onclick="preLoginSyncDiagnostics()">Test Sheet Connection / Load Users</button>
     <div id="login-url-section" style="margin-top:12px">
       <div style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:6px" onclick="(function(){var s=document.getElementById('login-url-fields');s.style.display=s.style.display==='none'?'block':'none'})()">
         <span style="font-size:10px;color:var(--text3)">⚙ Apps Script URL</span>
@@ -10659,7 +10659,7 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
   async function readTab(sourceKey, tab, headerRow){
     const source = V4.sheets[sourceKey];
     const _postBody={action:'read', sheetId:source.id, spreadsheetId:source.id, sheetName:tab, tab:tab, headerRow:headerRow, dept:(source.dept||'')};
-    const res=await fetch( + ERP_URL + ,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(_postBody),cache:'no-store'});
+    const res=await fetch('https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(_postBody),cache:'no-store'});
     const txt=await res.text();
     let json; try{ json=JSON.parse(txt); }catch(e){ throw new Error('Non-JSON Apps Script response for '+tab+': '+txt.slice(0,120)); }
     if(json && json.ok===false) throw new Error(json.error||('Apps Script read failed for '+tab));
@@ -11801,7 +11801,7 @@ navigate = (function(orig){
     const machineFactorsEE = (cs.machineFactorsEE && typeof cs.machineFactorsEE==='object') ? cs.machineFactorsEE : {};
     const machineFactorsOEE = (cs.machineFactorsOEE && typeof cs.machineFactorsOEE==='object') ? cs.machineFactorsOEE : {};
     const machineSpeeds = (cs.machineStandardSpeeds && typeof cs.machineStandardSpeeds==='object') ? cs.machineStandardSpeeds : {};
-    (APP.productionData||[]).forEach(r=>{
+    ((typeof APP!=="undefined"&&APP?APP:window.APP||{}).productionData||[]).forEach(r=>{
       const dept=deptFromRow(r);
       if(!isLSBM(dept)) return;
       r.dept=dept;
@@ -13872,7 +13872,7 @@ console.log('[UP ERP V25] Detail report fix applied — renderDeptRows direct re
   function loadCache(){
     try{
       var raw = localStorage.getItem(CACHE_KEY);
-      if(raw){ var arr = JSON.parse(raw); if(Array.isArray(arr)){ (typeof APP!=="undefined"&&APP&&APP.upDispatchData) = arr; state.loaded = true; } }
+      if(raw){ var arr = JSON.parse(raw); if(Array.isArray(arr)){ if(typeof APP!=="undefined"&&APP){ APP.upDispatchData = arr; state.loaded = true; } } }
     }catch(e){}
     if(!Array.isArray(APP.upDispatchData)) APP.upDispatchData = [];
   }
@@ -15046,7 +15046,7 @@ function stageBar(status){
 
 // ── Sidebar badge ─────────────────────────────────────────────────────────
 function updateBadge(){
-  const n=(APP.maintenanceRequests||[]).filter(r=>{
+  const n=((typeof APP!=="undefined"&&APP?APP:window.APP||{}).maintenanceRequests||[]).filter(r=>{
     const st=g(r,'status');
     if(['LOCKED','CLOSED'].includes(st)) return false;
     // show badge items relevant to current role
@@ -20479,7 +20479,7 @@ window.ppRequestUnlock = function(month){
 
   document.getElementById('modal-footer').innerHTML = [
     '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>',
-    '<button class="btn btn-primary" onclick="window.ppSendUnlockRequest(''+month+'',''+uname+'',''+dept+'')">📨 Request bhejo</button>'
+    '<button class="btn btn-primary" onclick="window.ppSendUnlockRequest(&quot;'+month+'&quot;,&quot;'+uname+'&quot;,&quot;'+dept+'&quot;)">📨 Request bhejo</button>'
   ].join('');
 
   document.getElementById('modal-overlay').style.display = 'flex';
@@ -20959,9 +20959,7 @@ setTimeout(function(){
         username: a.currentUser.username
       });
       if(data.ok){
-        alert('✅ Backup complete!
-Folder: '+data.folder+'
-'+data.backed+' files backed up to Google Drive');
+        alert('✅ Backup complete! Folder: '+data.folder+' | '+data.backed+' files backed up to Google Drive');
       } else {
         alert('❌ Backup failed: '+data.error);
       }
