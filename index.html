@@ -10235,7 +10235,15 @@ async function upReadTab(key, tabName){
   return rows;
 }
 syncOneSource = async function(key){
+  // Alias map — callers may use long names, SOURCES uses short keys
+  const KEY_ALIAS = {
+    'PLANNING_ORDER_MASTER':'PLANNING',
+    'WIP_MATERIAL_MASTER'  :'WIP',
+    'MATERIAL_MASTER'      :'MASTER_DATA',
+  };
+  if(KEY_ALIAS[key]) key = KEY_ALIAS[key];
   const cfg=ERP_SHEET_CONFIG.SOURCES[key];
+  if(!cfg){ debugLog('warn','syncOneSource','Unknown key: '+key); return []; }
   const tabs=UP_ACTUAL_TAB_MAP[key] || [cfg.sourceTabName, cfg.masterTabName].filter(Boolean);
   try{
     let allRows=[];
