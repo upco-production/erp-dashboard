@@ -9685,8 +9685,27 @@ async function erpApi(params={}, body=null){
   p.tab = p.tab || p.sheetName || p.tabName || '';
   p.headerRow = p.headerRow || 3;
   if(!p.action) p.action = 'readsystem';
-  if(p.sheetId === SYSTEM_ID || p.source === 'SYSTEM_MASTER') p.action = 'readsystem';
-  if(p.dept && p.dept !== 'SYSTEM_MASTER') p.action = 'read';
+
+  // ── Determine early whether this is a POST action ─────────────────────────
+  // We must check POST_ACTIONS BEFORE applying any action-overriding rules
+  // (system/dept/incharge guards), otherwise maintenance write actions like
+  // maintenanceSubmit get silently overwritten to 'read'/'readsystem' and
+  // fall through to the GET path — causing "Unknown action" on Apps Script.
+  const _POST_ACTIONS_EARLY = new Set([
+    'maintenancesubmit','maintenanceupdate','maintenancedelete','maintenanceprogress',
+    'maintenanceread',
+    'fcm_send','fcm_register','fcm_unregister','savefcmtoken',
+    'writeinchargerow','updateinchargerow',
+    'loglockedperiodattempt','checkpostingperiod',
+    'adminresetpassword','runbackup','inchargedatachanged'
+  ]);
+  const _isPostAction = _POST_ACTIONS_EARLY.has(String(p.action||'').toLowerCase());
+
+  // Only apply read-routing guards for non-POST actions
+  if(!_isPostAction){
+    if(p.sheetId === SYSTEM_ID || p.source === 'SYSTEM_MASTER') p.action = 'readsystem';
+    if(p.dept && p.dept !== 'SYSTEM_MASTER') p.action = 'read';
+  }
   const INCHARGE_MAP = {
     '1qB9ort3sX3P0fiqyaP2WxEF9KcYwlpIZGWOfn_fxKVs':'PRINTING',
     '143EJbfmkpp9XNtfZDot5ydac_Xth8YTHR0iqNWTqSYw':'INK',
@@ -9697,17 +9716,10 @@ async function erpApi(params={}, body=null){
     '12aZX2Pz0J-sb1s8psnBOs30Dlud1WkYFDXlXtXU03eE':'DISPATCH',
     '1KNIVZ5vMtcHJ8UZijXwP8MZ0xi6z5ndR47oBo4viwhs':'FG'
   };
-  if(p.sheetId && INCHARGE_MAP[p.sheetId]){ p.action='read'; p.dept=INCHARGE_MAP[p.sheetId]; }
+  if(!_isPostAction && p.sheetId && INCHARGE_MAP[p.sheetId]){ p.action='read'; p.dept=INCHARGE_MAP[p.sheetId]; }
 
   // POST actions — maintenance writes, FCM, incharge edits
-  const POST_ACTIONS = new Set([
-    'maintenancesubmit','maintenanceupdate','maintenancedelete','maintenanceprogress',
-    'maintenanceread',
-    'fcm_send','fcm_register','fcm_unregister','savefcmtoken',
-    'writeinchargerow','updateinchargerow',
-    'loglockedperiodattempt','checkpostingperiod',
-    'adminresetpassword','runbackup','inchargedatachanged'
-  ]);
+  const POST_ACTIONS = _POST_ACTIONS_EARLY; // reuse the set defined above
 
   const actionLower = String(p.action||'').toLowerCase();
   if(POST_ACTIONS.has(actionLower)){
