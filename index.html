@@ -4681,7 +4681,7 @@ function jptRenderWIP(allPlanRows){
   const raw=APP.wipData||[];
   // Exclude stages outside production scope; normalise ".0" suffix from Apps Script
   const _skipStage=s=>{const u=String(s||'').toUpperCase().replace(/\s+/g,' ');
-    return u===''||u==='UNKNOWN'||u==='DISPATCH READY'||u==='DISPATCHED';};
+    return u===''||u==='UNKNOWN'||u==='DISPATCHED';}; // DISPATCH READY = still in production, show it
   const cleanOrd=v=>String(v||'').replace(/\.0+$/,'').trim();
   const rows=raw.map(normWIPRow).filter(r=>{
     if(!r.order||cleanOrd(r.order)==='0') return false;
@@ -10456,7 +10456,10 @@ async function upReadTabMultiPattern(key, tabName){
 }
 upReadTab = upReadTabMultiPattern;
 syncOneSource = async function(key){
+  const _KEY_ALIAS={'PLANNING_ORDER_MASTER':'PLANNING','WIP_MATERIAL_MASTER':'WIP','MATERIAL_MASTER':'MASTER_DATA'};
+  if(_KEY_ALIAS[key]) key=_KEY_ALIAS[key];
   const cfg=ERP_SHEET_CONFIG.SOURCES[key];
+  if(!cfg){ debugLog('warn','syncOneSource','Unknown key: '+key); return []; }
   const tabs=UP_ACTUAL_TAB_MAP[key] || [cfg.sourceTabName, cfg.masterTabName].filter(Boolean);
   try{
     let allRows=[];
