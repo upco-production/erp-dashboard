@@ -21213,12 +21213,31 @@ window.handleNotifBtnClick = async function(){
     return;
   }
 
-  // YELLOW — not yet asked, request permission
+  // YELLOW — not yet asked, request permission + register token
   if(typeof toast==='function') toast('Enabling notifications…','info');
-  if(window.upFCM && typeof window.upFCM.register === 'function'){
-    await window.upFCM.register();
+
+  // Try multiple fallbacks for token registration
+  var _registerFn = (window.upFCM && window.upFCM.register)
+                  || window._fcmRegisterNow
+                  || null;
+
+  if(_registerFn){
+    await _registerFn();
+    window.updateNotifBtn();
+  } else {
+    // FCM not loaded yet — retry after 1.5s
+    console.warn('[FCM] Not ready, retrying…');
+    setTimeout(async function(){
+      var _fn = (window.upFCM && window.upFCM.register) || window._fcmRegisterNow;
+      if(_fn){
+        await _fn();
+        if(typeof window.updateNotifBtn==='function') window.updateNotifBtn();
+      } else {
+        if(typeof toast==='function')
+          toast('Please refresh page and try again.','error');
+      }
+    }, 1500);
   }
-  window.updateNotifBtn();
 };
 
 window.toggleNotifSilent = function(){
@@ -22010,6 +22029,14 @@ setTimeout(function(){
     send    : window.upSendPush,
     getToken: function(){ return _fcmToken || localStorage.getItem('up_fcm_token'); }
   };
+
+  // Also expose directly so handleNotifBtnClick can call it before upFCM is set
+  window._fcmRegisterNow = requestAndRegisterToken;
+
+  // Update bell button now that FCM is loaded
+  setTimeout(function(){
+    if(typeof window.updateNotifBtn === 'function') window.updateNotifBtn();
+  }, 500);
 
   console.log('[FCM] Notification system loaded');
 })();
