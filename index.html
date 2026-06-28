@@ -9679,7 +9679,6 @@ function getSourceUrl(params={}){
   return u.toString();
 }
 async function erpApi(params={}, body=null){
-  // USE GET with query params — POST body is lost on Apps Script 302 redirect
   const ERP_FIXED_URL = 'https://up-erp-fcm.admin-upco.workers.dev';
   const p = Object.assign({}, params, body||{});
   const SYSTEM_ID = '1_wS3PPXn2YM8hlKQipPhrH1ere4s2wvda-1ETAG1fFM';
@@ -9699,6 +9698,37 @@ async function erpApi(params={}, body=null){
     '1KNIVZ5vMtcHJ8UZijXwP8MZ0xi6z5ndR47oBo4viwhs':'FG'
   };
   if(p.sheetId && INCHARGE_MAP[p.sheetId]){ p.action='read'; p.dept=INCHARGE_MAP[p.sheetId]; }
+
+  // POST actions — maintenance writes, FCM, incharge edits
+  const POST_ACTIONS = new Set([
+    'maintenancesubmit','maintenanceupdate','maintenancedelete','maintenanceprogress',
+    'maintenanceread',
+    'fcm_send','fcm_register','fcm_unregister','savefcmtoken',
+    'writeinchargerow','updateinchargerow',
+    'loglockedperiodattempt','checkpostingperiod',
+    'adminresetpassword','runbackup','inchargedatachanged'
+  ]);
+
+  const actionLower = String(p.action||'').toLowerCase();
+  if(POST_ACTIONS.has(actionLower)){
+    // POST — send full body as JSON
+    debugLog('info','API POST', actionLower+(p.tab?'/'+p.tab:''));
+    try{
+      const r = await fetch(ERP_FIXED_URL, {
+        method:'POST',
+        headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body: JSON.stringify(p),
+        redirect:'follow'
+      });
+      const text = await r.text();
+      if(!r.ok) throw new Error('HTTP '+r.status+' '+text.slice(0,160));
+      try{ return JSON.parse(text); }catch(e){ throw new Error('Invalid JSON: '+text.slice(0,160)); }
+    }catch(e){
+      throw new Error('erpApi POST failed: '+e.message);
+    }
+  }
+
+  // GET — all read actions
   const url = new URL(ERP_FIXED_URL);
   Object.entries(p).forEach(([k,v])=>{ if(v!==undefined && v!=='') url.searchParams.set(k,String(v)); });
   url.searchParams.set('_', Date.now());
