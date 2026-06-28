@@ -9826,7 +9826,11 @@ async function syncAllSheets(){
 
   // 2. Production - all INCHARGE sheets in one call
   try{
-    const res = await fetch(_erpUrl+'?action=read&dept=ALL&_='+Date.now(),{cache:'no-store',redirect:'follow'});
+    const _from1=(function(){
+          const d=new Date(); d.setMonth(d.getMonth()-5); d.setDate(1);
+          return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-01';
+        })();
+    const res = await fetch(_erpUrl+'?action=read&dept=ALL&fromDate='+_from1+'&_='+Date.now(),{cache:'no-store',redirect:'follow'});
     const data = await res.json();
     if(data.ok && data.rows && data.rows.length){
       const rows = data.rows;
@@ -10664,7 +10668,11 @@ const order=['SYSTEM_MASTER','MASTER_DATA','PLANNING','WIP'];
     // INCHARGE sheets - fetch all departments in one GET call directly from individual sheets
     try{
       const _iUrl='https://up-erp-fcm.admin-upco.workers.dev';
-      const _ires=await fetch(_iUrl+'?action=read&dept=ALL&_='+Date.now(),{cache:'no-store',redirect:'follow'});
+      const _from2=(function(){
+          const d=new Date(); d.setMonth(d.getMonth()-5); d.setDate(1);
+          return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-01';
+        })();
+      const _ires=await fetch(_iUrl+'?action=read&dept=ALL&fromDate='+_from2+'&_='+Date.now(),{cache:'no-store',redirect:'follow'});
       const _itext=await _ires.text();
       let _idata; try{ _idata=JSON.parse(_itext); }catch(e){ throw new Error('Non-JSON response: '+_itext.slice(0,80)); }
       if(_idata.ok && Array.isArray(_idata.rows) && _idata.rows.length){
@@ -11261,10 +11269,15 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
       }catch(e){ APP.postingPeriods=APP.postingPeriods||[]; log('warn','POSTING_PERIOD_MASTER skipped',e.message); }
       // Fetch ALL INCHARGE sheets in one call → set production data
       try{
-        const _eres=await fetch('https://up-erp-fcm.admin-upco.workers.dev?action=read&dept=ALL&_='+Date.now(),{cache:'no-store',redirect:'follow'});
+        // fromDate = 6 months back so charts always have last 6 months data
+        const _sixMonthsAgo=(function(){
+          const d=new Date(); d.setMonth(d.getMonth()-5); d.setDate(1);
+          return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-01';
+        })();
+        const _eres=await fetch('https://up-erp-fcm.admin-upco.workers.dev?action=read&dept=ALL&fromDate='+_sixMonthsAgo+'&_='+Date.now(),{cache:'no-store',redirect:'follow'});
         const _edata=await _eres.json();
         const _allRows=(_edata.ok&&_edata.rows)?_edata.rows:[];
-        log('ok','INCHARGE/ALL',_allRows.length+' rows');
+        log('ok','INCHARGE/ALL',_allRows.length+' rows (from '+_sixMonthsAgo+')');
         const _prod=_allRows.filter(r=>['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].includes(String(r.__DEPT||'').toUpperCase()));
         APP.productionData=_prod.map(r=>{ try{ return normalizeRow(r,r.__DEPT+'_IMPORT'); }catch(e){ return r; } });
         APP.inkData       =_allRows.filter(r=>String(r.__DEPT||'')==='INK').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.PRODUCTION_DATE||'')}));
