@@ -10921,27 +10921,56 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
       }
       // Fetch POSTING_PERIOD_MASTER
       try{
-  // Fetch ALL INCHARGE sheets in one call
-  const _eres=await fetch('https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'read',dept:'ALL'}),cache:'no-store'});
-  const _edata=await _eres.json();
-  const _allRows=(_edata.ok&&_edata.rows)?_edata.rows:[];
-  log('ok','INCHARGE/ALL',_allRows.length+' rows');
-  // Split by department and set APP data directly
-  const _prod=_allRows.filter(r=>['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].includes(String(r.__DEPT||'').toUpperCase()));
-  const _ink =_allRows.filter(r=>String(r.__DEPT||'').toUpperCase()==='INK');
-  const _qlt =_allRows.filter(r=>String(r.__DEPT||'').toUpperCase()==='QUALITY');
-  const _dsp =_allRows.filter(r=>String(r.__DEPT||'').toUpperCase()==='DISPATCH');
-  const _fg  =_allRows.filter(r=>String(r.__DEPT||'').toUpperCase()==='FG');
-  APP.productionData=_prod.map(r=>{ try{ return normalizeRow(r,r.__DEPT+'_IMPORT'); }catch(e){ return r; } });
-  APP.inkData       =_ink.map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.PRODUCTION_DATE||r.DATE||'')}));
-  APP.ncrData       =_qlt.map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||r.DATE||'')}));
-  APP.dispatchData  =_dsp;
-  APP.fgData        =_fg;
-  log('ok','Production set','P:'+APP.productionData.length+' Ink:'+APP.inkData.length+' Q:'+APP.ncrData.length);
-}catch(e){
-  log('warn','INCHARGE fetch failed',e.message);
+        const periodRows = await readTab('SYSTEM_MASTER','POSTING_PERIOD_MASTER',3);
+        APP.postingPeriods = periodRows;
+        if(typeof window.ppBuildIndex==='function') window.ppBuildIndex(periodRows);
+        log('ok','POSTING_PERIOD_MASTER',periodRows.length+' period row(s)');
+      }catch(e){ APP.postingPeriods=APP.postingPeriods||[]; log('warn','POSTING_PERIOD_MASTER skipped',e.message); }
+      // Fetch ALL INCHARGE sheets in one call → set production data
+      try{
+        const _eres=await fetch('https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'read',dept:'ALL'}),cache:'no-store'});
+        const _edata=await _eres.json();
+        const _allRows=(_edata.ok&&_edata.rows)?_edata.rows:[];
+        log('ok','INCHARGE/ALL',_allRows.length+' rows');
+        const _prod=_allRows.filter(r=>['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].includes(String(r.__DEPT||'').toUpperCase()));
+        APP.productionData=_prod.map(r=>{ try{ return normalizeRow(r,r.__DEPT+'_IMPORT'); }catch(e){ return r; } });
+        APP.inkData       =_allRows.filter(r=>String(r.__DEPT||'')==='INK').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.PRODUCTION_DATE||'')}));
+        APP.ncrData       =_allRows.filter(r=>String(r.__DEPT||'')==='QUALITY').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||'')}));
+        APP.dispatchData  =_allRows.filter(r=>String(r.__DEPT||'')==='DISPATCH');
+        APP.fgData        =_allRows.filter(r=>String(r.__DEPT||'')==='FG');
+        log('ok','Production set','P:'+APP.productionData.length+' Ink:'+APP.inkData.length+' Q:'+APP.ncrData.length);
+      }catch(e){ log('warn','INCHARGE fetch failed',e.message); }
+      // Complete remaining Material, Planning, WIP syncs
+      try{
+        const matRows=await readTab('MATERIAL_MASTER','MATERIAL_MASTER',4);
+        APP.materialData=matRows;
+        log('ok','MATERIAL_MASTER',matRows.length+' rows');
+      }catch(e){ log('warn','MATERIAL_MASTER skipped',e.message); }
+      try{
+        const planRows=await readTab('PLANNING_ORDER_MASTER','PLANNING_ORDER_MASTER',5);
+        APP.planningData=planRows;
+        log('ok','PLANNING',planRows.length+' rows');
+      }catch(e){ log('warn','PLANNING skipped',e.message); }
+      if(!silent && typeof toast==='function') toast('Sync complete','success');
+      if(typeof navigate==='function') navigate(APP.currentPage||'dashboard');
+      return true;
+    }catch(e){
+      log('err','Live sync failed',e.message);
+      if(typeof toast==='function') toast('Sync failed: '+e.message,'error');
+      return false;
+    }finally{
+      V4.syncing=false;
+    }
+  }
+  window.syncLiveV4=syncLiveV4;
+  // Auto-sync on login
+  var _origDoLoginV4=window.doLogin;
+  window.doLogin=async function(){
+    if(typeof _origDoLoginV4==='function') await _origDoLoginV4.apply(this,arguments);
+    setTimeout(function(){ try{ syncLiveV4({silent:true}); }catch(e){} },800);
+  };
+  window.syncAllSheets=window.syncAllSheets||syncLiveV4;
 })();
-
 </script>
 
 <script type="text/javascript">
@@ -12395,7 +12424,7 @@ navigate = (function(orig){
     localStorage.setItem(CACHE_INDEX_KEY,JSON.stringify(idx));
   }catch(e){}
 
-  try{ if(typeof debugLog==='function') debugLog('ok','V22 Cache visibility/index fix loaded','Cache index self-repairs; Settings and header badge now show latest cache'); }catch(e){}
+  try{ if(typeof debugLog==='function') debugLog('ok','V22 Cache visibility/index fix loaded','Cache index self-repairs; Settings and header badge now show latest cache'); }catch(e){}')
 </script>
 
 <!-- UPC v2.0 replaces V23 -->
@@ -13742,7 +13771,7 @@ console.log('[UP ERP V25] Detail report fix applied — renderDeptRows direct re
       var raw = localStorage.getItem(CACHE_KEY);
       if(raw){ var arr = JSON.parse(raw); if(Array.isArray(arr)){ if(typeof APP!=="undefined"&&APP){ APP.upDispatchData = arr; state.loaded = true; } } }
     }catch(e){}
-    if(!Array.isArray(APP.upDispatchData)) APP.upDispatchData = [];
+    if(typeof APP!=="undefined"&&APP&&!Array.isArray(APP.upDispatchData)) APP.upDispatchData = [];
   }
 
   // ── data fetch via the EXISTING reader ───────────────────────
@@ -16581,7 +16610,7 @@ window.downloadMaintPDF=function(){
   win.document.close();
 };
 
-exportMaintCSV=window.exportMaintCSV||function(){};
+if(typeof exportMaintCSV==="undefined") var exportMaintCSV=function(){};
 
 
 // ── FCM Push Helper — builds rich payload, respects silent mode ──────────
@@ -20389,8 +20418,7 @@ window.ppAdminUnlock = function(month){
     return;
   }
 
-  if(!confirm(month + ' ka posting period unlock karna chahte hain?
-Yeh month dobara editable ho jaayega.')) return;
+  if(!confirm(month + ' ka posting period unlock karna chahte hain? Yeh month dobara editable ho jaayega.')) return;
 
   // Update in-memory index
   var idx = window._ppIndex || {};
@@ -20917,7 +20945,12 @@ setTimeout(function(){
       }
 
       a = getA();
-      if(!a){ showErr('App not initialized — F5 dabao.'); return; }
+      if(!a){
+        // Retry once after short delay
+        await new Promise(r=>setTimeout(r,500));
+        a = getA();
+        if(!a){ showErr('App not initialized — F5 dabao.'); return; }
+      }
       var cu=(typeof window.setCurrentUser==='function')?window.setCurrentUser(matched):matched;
       a.currentUser=cu;
 
