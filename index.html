@@ -21787,7 +21787,7 @@ setTimeout(function(){
       // Register service worker
       if('serviceWorker' in navigator){
         try{
-          await navigator.serviceWorker.register('./firebase-messaging-sw.js');
+          await navigator.serviceWorker.register('/firebase-messaging-sw.js');
           console.log('[FCM] Service worker registered');
         }catch(e){ console.warn('[FCM] SW register failed:', e.message); }
       }
