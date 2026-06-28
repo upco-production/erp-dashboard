@@ -15301,9 +15301,18 @@ async function apiPost(action,body){
 async function syncFromSheets(){
   try{
     const data=await apiGet('maintenanceRead');
-    if(Array.isArray(data)){ APP.maintenanceRequests=data; cacheReqs(); }
+    // Apps Script returns {ok:true, data:[...]} OR direct array
+    const rows = Array.isArray(data) ? data
+                : Array.isArray(data?.data) ? data.data
+                : Array.isArray(data?.rows) ? data.rows : null;
+    if(rows){ APP.maintenanceRequests=rows; cacheReqs(); }
+    else console.warn('[Maint] Unexpected response format:', JSON.stringify(data).slice(0,100));
+
     const prog=await apiGet('maintenanceRead',{tab:TAB_PROG});
-    if(Array.isArray(prog)){ APP.maintenanceProgress=prog; cacheProg(); }
+    const progRows = Array.isArray(prog) ? prog
+                   : Array.isArray(prog?.data) ? prog.data
+                   : Array.isArray(prog?.rows) ? prog.rows : null;
+    if(progRows){ APP.maintenanceProgress=progRows; cacheProg(); }
   }catch(e){ console.warn('[Maint] sync failed:',e.message); }
 }
 
