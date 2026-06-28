@@ -10534,8 +10534,6 @@ function showDashboardLoadingState(){
 function refreshCurrentPageAfterSync(page){
   const targetPage = page || APP.currentPage || 'dashboard';
   try { navigate(targetPage); } catch(e) { debugLog('warn','Page refresh after sync failed', e.message); }
-  // Some Chart.js canvases need a second paint after the content container becomes visible.
-  setTimeout(()=>{ try { navigate(targetPage); } catch(e){} }, 120);
 }
 
 syncAllSheets = async function(options={}){
@@ -10558,7 +10556,8 @@ const order=['SYSTEM_MASTER','MASTER_DATA','PLANNING','WIP'];
     try{
       const _iUrl='https://up-erp-fcm.admin-upco.workers.dev';
       const _ires=await fetch(_iUrl+'?action=read&dept=ALL&_='+Date.now(),{cache:'no-store',redirect:'follow'});
-      const _idata=await _ires.json();
+      const _itext=await _ires.text();
+      let _idata; try{ _idata=JSON.parse(_itext); }catch(e){ throw new Error('Non-JSON response: '+_itext.slice(0,80)); }
       if(_idata.ok && Array.isArray(_idata.rows) && _idata.rows.length){
         const _rows=_idata.rows;
         APP.inkData        = _rows.filter(r=>r.__DEPT==='INK').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.PRODUCTION_DATE||r.DATE||'')||APP.currentMonth}));
@@ -11360,7 +11359,17 @@ navigate = (function(orig){
   }
   if(window.Chart && !window.Chart.__upV6Patched){
     const OriginalChart=window.Chart;
-    const PatchedChart=function(ctx, config){ return new OriginalChart(ctx, forceSixMonthAxis(config)); };
+    const PatchedChart=function(ctx, config){
+  // Destroy any existing chart on this canvas before creating a new one
+  try{
+    const canvasEl = (ctx && ctx.canvas) ? ctx.canvas : (typeof ctx === 'string' ? document.getElementById(ctx) : ctx);
+    if(canvasEl){
+      const existingChart = OriginalChart.getChart(canvasEl);
+      if(existingChart) existingChart.destroy();
+    }
+  }catch(e){}
+  return new OriginalChart(ctx, forceSixMonthAxis(config));
+};
     Object.keys(OriginalChart).forEach(k=>{ try{ PatchedChart[k]=OriginalChart[k]; }catch(e){} });
     PatchedChart.prototype=OriginalChart.prototype;
     PatchedChart.__upV6Patched=true;
