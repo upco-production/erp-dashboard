@@ -1672,7 +1672,7 @@ function renderDashboard(container) {
         <div class="kpi-target">Target: <span style="color:${ncrCount<=10?'var(--green)':'var(--red)'}">&lt;10</span></div>
         <div class="kpi-progress"><div class="kpi-progress-bar" style="width:${Math.min(ncrCount/10*100,100).toFixed(0)}%;background:${ncrCount<=10?'var(--green)':'var(--red)'}"></div></div>
       </div>
-      <div class="kpi-card cyan" onclick="navigate('jobtracker')">
+      <div class="kpi-card cyan" onclick="navigate('dispatch')">
         <div class="kpi-card-head">
           <div class="kpi-icon" style="background:rgba(57,208,216,.1)">🚚</div>
           <div class="kpi-badge ${upDispatch>=500?'up':'down'}">${upDispatch>=500?'▲':'▼'} ${Math.abs(((upDispatch/500)*100)-100).toFixed(1)}%</div>
@@ -1682,7 +1682,7 @@ function renderDashboard(container) {
         <div class="kpi-target">Target: <span>500</span></div>
         <div class="kpi-progress"><div class="kpi-progress-bar" style="width:${targetProgress(upDispatch,500)}%;background:linear-gradient(90deg,#39d0d8,#1f6feb)"></div></div>
       </div>
-      <div class="kpi-card green" onclick="navigate('jobtracker')">
+      <div class="kpi-card green" onclick="navigate('dispatch')">
         <div class="kpi-card-head">
           <div class="kpi-icon" style="background:rgba(63,185,80,.1)">🚛</div>
           <div class="kpi-badge ${ufDispatch>=200?'up':'down'}">${ufDispatch>=200?'▲':'▼'} ${Math.abs(((ufDispatch/200)*100)-100).toFixed(1)}%</div>
@@ -1692,7 +1692,7 @@ function renderDashboard(container) {
         <div class="kpi-target">Target: <span>200</span></div>
         <div class="kpi-progress"><div class="kpi-progress-bar" style="width:${targetProgress(ufDispatch,200)}%;background:linear-gradient(90deg,#3fb950,#20d68f)"></div></div>
       </div>
-      <div class="kpi-card purple" onclick="navigate('jobtracker')">
+      <div class="kpi-card purple" onclick="navigate('dispatch')">
         <div class="kpi-card-head">
           <div class="kpi-icon" style="background:rgba(163,113,247,.1)">✈</div>
           <div class="kpi-badge ${exportDispatch>=100?'up':'down'}">${exportDispatch>=100?'▲':'▼'} ${Math.abs(((exportDispatch/100)*100)-100).toFixed(1)}%</div>
@@ -10694,14 +10694,20 @@ function sseApplyRows(rows){
   const disp  = rows.filter(r=>String(r.__DEPT||'')==='DISPATCH');
   const fg    = rows.filter(r=>String(r.__DEPT||'')==='FG');
 
+  // Which production depts are present in this fetch?
+  const fetchedProdDepts = new Set(prod.map(r=>String(r.__DEPT||'').toUpperCase()));
+
   if(prod.length){
     const norm = prod.map(r=>{ try{ return upNormalizeProductionByTab(r,r.__DEPT+'_IMPORT'); }catch(e){ return r; } });
-    // Merge: replace open-month rows, keep frozen rows
-    const frozenProd = (APP.productionData||[]).filter(r=>{
+    // Keep: locked month rows (all depts) + open month rows for NON-fetched depts
+    const keep = (APP.productionData||[]).filter(r=>{
       const m = r.month||upDateToMonthKey(r.PRODUCTION_DATE||r.DATE||'')||'';
-      return typeof window.isMonthLocked==='function' && window.isMonthLocked(m);
+      const d = String(r.dept||r.Department||r.__DEPT||r.DEPARTMENT||'').toUpperCase();
+      const locked = typeof window.isMonthLocked==='function' && window.isMonthLocked(m);
+      // Keep if: locked month OR dept not in this fetch
+      return locked || !fetchedProdDepts.has(d);
     });
-    APP.productionData = frozenProd.concat(norm);
+    APP.productionData = keep.concat(norm);
   }
   if(ink.length){
     const frozenInk = (APP.inkData||[]).filter(r=>typeof window.isMonthLocked==='function'&&window.isMonthLocked(r.month||''));
@@ -14484,17 +14490,50 @@ console.log('[UP ERP V25] Detail report fix applied — renderDeptRows direct re
   // window._fgRows etc.) but renders inline inside the dispatch body div
   // so it feels like a native fourth tab.
   function renderFGStockInDispatch(container){
-    // Build a minimal wrapper div that the FG module can populate
-    container.innerHTML = '<div id="fg-dispatch-wrapper" style="padding:8px 0"></div>';
+    container.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:0 4px">' +
+        '<span style="font-weight:600;font-size:13px">📦 FG Stock</span>' +
+        '<button class="btn btn-primary btn-sm" id="fg-sync-btn" onclick="fgSyncNow()" style="font-size:11px;padding:4px 12px">🔄 Sync FG</button>' +
+      '</div>' +
+      '<div id="fg-dispatch-wrapper" style="padding:4px 0"></div>';
     var wrapper = document.getElementById('fg-dispatch-wrapper');
     if(!wrapper) return;
-    // Reuse the standalone FG module's render logic
     if(typeof window.renderFGStock === 'function'){
       window.renderFGStock(wrapper);
     } else {
       wrapper.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3)">FG Stock module not loaded.</div>';
     }
   }
+
+  // FG on-demand sync
+  window.fgSyncNow = async function(){
+    var btn = document.getElementById('fg-sync-btn');
+    if(btn){ btn.disabled=true; btn.textContent='⏳ Syncing...'; }
+    try{
+      const openMonths = sseGetOpenMonths();
+      const fromDate   = sseMonthToFromDate(openMonths);
+      var u = new URL(PROXY_URL);
+      u.searchParams.set('action','read'); u.searchParams.set('dept','FG');
+      if(fromDate) u.searchParams.set('fromDate', fromDate);
+      u.searchParams.set('_', Date.now());
+      var res  = await fetch(u.toString(), {cache:'no-store', redirect:'follow'});
+      var text = await res.text();
+      var json; try{ json=JSON.parse(text); }catch(e){ throw new Error('Non-JSON: '+text.slice(0,60)); }
+      if(json.rows && json.rows.length){
+        APP.fgData = json.rows;
+        toast('FG Stock synced — '+json.rows.length+' rows','success');
+        // Re-render FG tab
+        var wrapper = document.getElementById('fg-dispatch-wrapper');
+        if(wrapper && typeof window.renderFGStock==='function') window.renderFGStock(wrapper);
+      } else {
+        toast('FG: 0 rows returned','warn');
+      }
+    }catch(e){
+      toast('FG sync failed: '+e.message,'error');
+    }finally{
+      if(btn){ btn.disabled=false; btn.textContent='🔄 Sync FG'; }
+    }
+  };
 
   window.upDispatch = {
     switchTab: function(tab){ renderTab(tab); },
