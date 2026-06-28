@@ -4680,12 +4680,14 @@ function wipStatusBadge(s){
 function jptRenderWIP(allPlanRows){
   const raw=APP.wipData||[];
   // Exclude stages outside production scope; normalise ".0" suffix from Apps Script
-  const _skipStage=s=>{const u=String(s||'').toUpperCase().replace(/\s+/g,' ');
-    return u===''||u==='UNKNOWN'||u==='DISPATCHED';}; // DISPATCH READY = still in production, show it
   const cleanOrd=v=>String(v||'').replace(/\.0+$/,'').trim();
+  // WIP tab: only show IN PROGRESS, ON HOLD, COMPLETED
+  // ORDER_STATUS comes from Planning Master Col E (written by Apps Script into WIP_ORDER_LINK)
+  const _WIP_SHOW_STATUS = new Set(['IN PROGRESS','IN PROGESS','ON HOLD','COMPLETED']);
   const rows=raw.map(normWIPRow).filter(r=>{
     if(!r.order||cleanOrd(r.order)==='0') return false;
-    if(_skipStage(r.currentStage)) return false;
+    const st = String(r.status||'').toUpperCase().replace(/\s+/g,' ').trim();
+    if(!_WIP_SHOW_STATUS.has(st)) return false;
     return true;
   });
 
