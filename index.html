@@ -8111,7 +8111,12 @@ function normalizeProductionRow(row){
     ? +((productionMin/availableMin)*100).toFixed(2)
     : sheetOEE;
   const standardSpeed = avgSpeedMM;
-  const calcWastePct=prodKg?((dept==='Printing'?(wasteKg/prodKg/2):(wasteKg/prodKg))*100):0;
+  // Waste % — use sheet value (PCTTOTAL_WASTE = %TOTAL WASTE after normalization)
+  // Only calculate if sheet value is missing
+  const sheetWastePct = +(row.TOTAL_WASTE_PCT||row.PCTTOTAL_WASTE||row.TOTAL_WASTE_PERCENT||0);
+  const calcWastePct = sheetWastePct > 0
+    ? sheetWastePct
+    : (prodKg ? (dept==='Printing'?(wasteKg/prodKg/2)*100:(wasteKg/prodKg)*100) : 0);
   const iso=row.PRODUCTION_DATE||row.Date||row.date||formatDate(new Date());
   const r2=v=>Math.round((+v||0)*100)/100;
   return {...row, id: row.id||Date.now()+Math.random(), month: row.month||keyFromISO(iso), dept,
@@ -9084,18 +9089,20 @@ function wastageDeptBreakdown(){
     return {dept:dep, prodKg, totalW, approvalW, techW, extraW};
   });
   const [P, L, S, B] = deptData;
+  // Printing: (waste/prod)/2 * 100 (wet/dry normalisation)
+  // Slit+BM:  (SlitWaste+BMWaste)/(SlitProd+BMProd) * 100
   const printPct  = P.prodKg>0 ? (P.totalW/P.prodKg)/2*100 : 0;
   const lamPct    = L.prodKg>0 ? (L.totalW/L.prodKg)*100   : 0;
+  const slitPct   = S.prodKg>0 ? (S.totalW/S.prodKg)*100 : 0;
+  const bmPct     = B.prodKg>0 ? (B.totalW/B.prodKg)*100 : 0;
   const slitBmPct = (S.prodKg+B.prodKg)>0 ? ((S.totalW+B.totalW)/(S.prodKg+B.prodKg))*100 : 0;
-  // Per-dept approval/tech/extraTrim % (each over own prodKg)
   const approvalPct  = P.prodKg>0 ? (P.approvalW/P.prodKg)*100 : 0;
-  const extraTrimPct = S.prodKg>0 ? (S.extraW/S.prodKg)*100   : 0;
+  const extraTrimPct = S.prodKg>0 ? (S.extraW/S.prodKg)*100 : 0;
   const totalProdKg  = deptData.reduce((a,x)=>a+x.prodKg,0);
   const totalTechW   = deptData.reduce((a,x)=>a+x.techW,0);
   const technicalPct = totalProdKg>0 ? (totalTechW/totalProdKg)*100 : 0;
   const overallPct   = printPct + lamPct + slitBmPct;
   const netPct       = Math.max(overallPct - approvalPct - extraTrimPct - technicalPct, 0);
-  // Return per[] array compatible with downstream code that iterates it
   const per = deptData.map(d=>{
     const pct = d.prodKg>0 ? (d.dept==='Printing'?(d.totalW/d.prodKg)/2*100:(d.totalW/d.prodKg)*100) : 0;
     return {...d, totalPct:pct,
@@ -9296,6 +9303,7 @@ function wastageMetricsForMonthUP(month){
   const eS=dep('Slitting').reduce((a,r)=>a+fld(r,['EXTRA_TRIM_WASTE','EXTRA_TRIM_WASTE_KG','extraTrimWaste']),0);
   const tT=mRows.reduce((a,r)=>a+fld(r,['TECHNICAL_WASTE','TECHNICAL_WASTE_KG','TECHNICAL_WASTAGE_KG','technicalWaste']),0);
   const totProd=pP+pL+pS+pB;
+  // Printing: /2 normalisation; Slit+BM combined formula
   const printPct  = pP>0?(wP/pP)/2*100:0;
   const lamPct    = pL>0?(wL/pL)*100:0;
   const slitBmPct = (pS+pB)>0?((wS+wB)/(pS+pB))*100:0;
@@ -9833,7 +9841,7 @@ async function syncOneSource(key){
       }
     }
     if(key==='SYSTEM_MASTER') APP.users=rows.map(normalizeUserRow).filter(x=>x.username);
-if(key==='PRINTING'||key==='LAMINATION'||key==='SLITTING'||key==='BAG_MAKING') APP.productionData=(APP.productionData||[]).concat(rows.map ? rows.map(normalizeProdSheetRow) : []);
+if(key==='PRINTING'||key==='LAMINATION'||key==='SLITTING'||key==='BAG_MAKING') APP.productionData=dedupProductionData((APP.productionData||[]).concat(rows.map ? rows.map(normalizeProdSheetRow) : []));
     if(key==='WIP') APP.wipData=rows;
     if(key==='MASTER_DATA') APP.materialData=rows;
     if(key==='PLANNING') APP.planningData=rows;
@@ -9872,7 +9880,7 @@ async function syncAllSheets(){
       APP.ncrData        = rows.filter(r=>r.__DEPT==='QUALITY').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||r.DATE||'')}));
       APP.dispatchData   = rows.filter(r=>r.__DEPT==='DISPATCH');
       APP.fgData         = rows.filter(r=>r.__DEPT==='FG');
-      APP.productionData = rows.filter(r=>['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].includes(r.__DEPT))
+      APP.productionData = dedupProductionData(rows.filter(r=>['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].includes(r.__DEPT)))
                                .map(r=>{ try{return upNormalizeProductionByTab(r,r.__DEPT+'_IMPORT');}catch(e){return r;} });
       setSourceStatus('PRINTING','OK',APP.productionData.length);
       debugLog('ok','All INCHARGE synced','P:'+APP.productionData.length+' Ink:'+APP.inkData.length+' Q:'+APP.ncrData.length+' D:'+APP.dispatchData.length);
@@ -10113,7 +10121,7 @@ syncOneSource = async function(key){
     }
     const json=await erpApi({action:'read', sheetId:cfg.sourceSheetId, sheetName:cfg.sourceTabName, master:cfg.masterSheetName, tab:cfg.masterTabName, source:key});
     rows=rowsFromResponse(json,key).map(x=>x||{});
-if(['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].includes(key)) APP.productionData=(APP.productionData||[]).concat(rows.map ? rows.map(normalizeProdSheetRow) : []);
+if(['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].includes(key)) APP.productionData=dedupProductionData((APP.productionData||[]).concat(rows.map ? rows.map(normalizeProdSheetRow) : []));
     if(key==='WIP') APP.wipData=rows;
     if(key==='MASTER_DATA') APP.materialData=rows;
     if(key==='PLANNING') APP.planningData=rows;
@@ -10475,13 +10483,13 @@ if(false && key==='PRODUCTION_MASTER'){ // removed - data from INCHARGE sheets
       APP.ncrData = allRows.filter(r=>r.__SOURCE_TAB==='QUALITY_MASTER').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||r.DATE)}));
       APP.dispatchData = allRows.filter(r=>r.__SOURCE_TAB==='DISPATCH_MASTER');
       APP.fgData = allRows.filter(r=>r.__SOURCE_TAB==='FG_MASTER');
-      APP.productionData = allRows.filter(r=>['PRINTING_MASTER','LAMINATION_MASTER','SLITTING_MASTER','BAG_MAKING_MASTER'].includes(r.__SOURCE_TAB)).map(r=>upNormalizeProductionByTab(r,r.__SOURCE_TAB));
+      APP.productionData = dedupProductionData(allRows.filter(r=>['PRINTING_MASTER','LAMINATION_MASTER','SLITTING_MASTER','BAG_MAKING_MASTER'].includes(r.__SOURCE_TAB)).map(r=>upNormalizeProductionByTab(r,r.__SOURCE_TAB)));
       debugLog('ok','Production master split',`Production ${APP.productionData.length}, Ink ${APP.inkData.length}, Quality ${APP.ncrData.length}, Dispatch ${APP.dispatchData.length}, FG ${(APP.fgData||[]).length}`);
     }
     if(false)/* IMPORT_MASTER removed */{
       APP.importData=allRows;
       if(!APP.productionData || !APP.productionData.length){
-        APP.productionData=allRows.filter(r=>['PRINTING_IMPORT','LAMINATION_IMPORT','SLITTING_IMPORT','BAG_MAKING_IMPORT'].includes(r.__SOURCE_TAB)).map(r=>upNormalizeProductionByTab(r,r.__SOURCE_TAB));
+        APP.productionData=dedupProductionData(allRows.filter(r=>['PRINTING_IMPORT','LAMINATION_IMPORT','SLITTING_IMPORT','BAG_MAKING_IMPORT'].includes(r.__SOURCE_TAB)).map(r=>upNormalizeProductionByTab(r,r.__SOURCE_TAB)));
       }
       if(!APP.inkData || !APP.inkData.length) APP.inkData=allRows.filter(r=>r.__SOURCE_TAB==='INK_IMPORT').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.PRODUCTION_DATE||r.DATE)}));
       if(!APP.ncrData || !APP.ncrData.length) APP.ncrData=allRows.filter(r=>r.__SOURCE_TAB==='QUALITY_IMPORT').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||r.DATE)}));
@@ -10709,13 +10717,13 @@ if(false && key==='PRODUCTION_MASTER'){ // removed
       APP.ncrData = allRows.filter(r=>r.__SOURCE_TAB==='QUALITY_MASTER').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||r.DATE)}));
       APP.dispatchData = allRows.filter(r=>r.__SOURCE_TAB==='DISPATCH_MASTER');
       APP.fgData = allRows.filter(r=>r.__SOURCE_TAB==='FG_MASTER');
-      APP.productionData = allRows.filter(r=>['PRINTING_MASTER','LAMINATION_MASTER','SLITTING_MASTER','BAG_MAKING_MASTER'].includes(r.__SOURCE_TAB)).map(r=>upNormalizeProductionByTab(r,r.__SOURCE_TAB));
+      APP.productionData = dedupProductionData(allRows.filter(r=>['PRINTING_MASTER','LAMINATION_MASTER','SLITTING_MASTER','BAG_MAKING_MASTER'].includes(r.__SOURCE_TAB)).map(r=>upNormalizeProductionByTab(r,r.__SOURCE_TAB)));
       debugLog('ok','Production master split',`Production ${APP.productionData.length}, Ink ${APP.inkData.length}, Quality ${APP.ncrData.length}, Dispatch ${APP.dispatchData.length}, FG ${(APP.fgData||[]).length}`);
     }
     if(false)/* IMPORT_MASTER removed */{
       APP.importData=allRows;
       if(!APP.productionData || !APP.productionData.length){
-        APP.productionData=allRows.filter(r=>['PRINTING_IMPORT','LAMINATION_IMPORT','SLITTING_IMPORT','BAG_MAKING_IMPORT'].includes(r.__SOURCE_TAB)).map(r=>upNormalizeProductionByTab(r,r.__SOURCE_TAB));
+        APP.productionData=dedupProductionData(allRows.filter(r=>['PRINTING_IMPORT','LAMINATION_IMPORT','SLITTING_IMPORT','BAG_MAKING_IMPORT'].includes(r.__SOURCE_TAB)).map(r=>upNormalizeProductionByTab(r,r.__SOURCE_TAB)));
       }
       if(!APP.inkData || !APP.inkData.length) APP.inkData=allRows.filter(r=>r.__SOURCE_TAB==='INK_IMPORT').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.PRODUCTION_DATE||r.DATE)}));
       if(!APP.ncrData || !APP.ncrData.length) APP.ncrData=allRows.filter(r=>r.__SOURCE_TAB==='QUALITY_IMPORT').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||r.DATE)}));
@@ -10829,7 +10837,7 @@ const order=['SYSTEM_MASTER','MASTER_DATA','PLANNING','WIP'];
         APP.ncrData        = _rows.filter(r=>r.__DEPT==='QUALITY').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||r.DATE||'')||APP.currentMonth}));
         APP.dispatchData   = _rows.filter(r=>r.__DEPT==='DISPATCH');
         APP.fgData         = _rows.filter(r=>r.__DEPT==='FG');
-        APP.productionData = _rows.filter(r=>['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].includes(r.__DEPT))
+        APP.productionData = dedupProductionData(_rows.filter(r=>['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].includes(r.__DEPT)))
                                .map(r=>{ try{ return upNormalizeProductionByTab(r,r.__DEPT+'_IMPORT'); }catch(e){ return r; } });
         setSourceStatus('PRINTING','OK',APP.productionData.length);
         debugLog('ok','All INCHARGE synced','P:'+APP.productionData.length+' Ink:'+APP.inkData.length+' Q:'+APP.ncrData.length+' D:'+APP.dispatchData.length);
@@ -10964,7 +10972,7 @@ function sseApplyRows(rows){
       // Keep if: locked month OR dept not in this fetch
       return locked || !fetchedProdDepts.has(d);
     });
-    APP.productionData = keep.concat(norm);
+    APP.productionData = dedupProductionData(keep.concat(norm));
   }
   if(ink.length){
     const frozenInk = (APP.inkData||[]).filter(r=>typeof window.isMonthLocked==='function'&&window.isMonthLocked(r.month||''));
