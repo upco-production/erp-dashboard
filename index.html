@@ -14977,7 +14977,13 @@ function isTech(){
   if(typeof window.isTechnicalTeam==='function'&&window.isTechnicalTeam()) return true;
   // Fallback: check role directly on APP.currentUser
   const r=String(APP?.currentUser?.role||'').trim().toUpperCase();
-  return /^TECH_(MECHANICAL|ELECTRICAL|UTILITIES)$/.test(r);
+  // TECH_ roles (field technicians)
+  if(/^TECH_(MECHANICAL|ELECTRICAL|UTILITIES)$/.test(r)) return true;
+  // Incharge roles for mechanical/electrical/utility departments
+  if(/^(MECH|ELEC|UTIL)_INCHARGE$/.test(r)) return true;
+  // Tech manager and utility tech roles
+  if(r==='TECH_MANAGER'||r==='TECH_UTILITY') return true;
+  return false;
 }
 function curRole(){ return String(APP?.currentUser?.role||'').trim().toUpperCase(); }
 function curName(){
