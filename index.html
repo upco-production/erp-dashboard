@@ -9827,16 +9827,12 @@ async function syncAllSheets(){
   // 2. Production - all INCHARGE sheets in one call
   try{
     const _from1=(function(){
-          // Go back 6 months from currently selected month (not today)
-          // so charts always show correct last-6-months regardless of which month is selected
-          var _cur = (typeof APP!=='undefined' && APP.currentMonth) || '';
-          var _mn = {'Jan':1,'Feb':2,'Mar':3,'Apr':4,'May':5,'Jun':6,'Jul':7,'Aug':8,'Sep':9,'Oct':10,'Nov':11,'Dec':12};
-          var _parts = _cur.split('-');
-          var _m = _mn[_parts[0]] || new Date().getMonth()+1;
-          var _y = _parts[1] ? 2000+parseInt(_parts[1]) : new Date().getFullYear();
-          // Go back 5 more months to get 6 total
-          _m -= 5; if(_m<=0){_m+=12;_y--;}
-          return _y+'-'+String(_m).padStart(2,'0')+'-01';
+          // Always fetch last 7 months from today so any month selection works
+          // Using today's date - no dependency on APP.currentMonth which may not be set
+          var _d = new Date();
+          _d.setMonth(_d.getMonth() - 6);
+          _d.setDate(1);
+          return _d.getFullYear()+'-'+String(_d.getMonth()+1).padStart(2,'0')+'-01';
         })();
     const res = await fetch(_erpUrl+'?action=read&dept=ALL&fromDate='+_from1+'&_='+Date.now(),{cache:'no-store',redirect:'follow'});
     const data = await res.json();
@@ -10677,16 +10673,12 @@ const order=['SYSTEM_MASTER','MASTER_DATA','PLANNING','WIP'];
     try{
       const _iUrl='https://up-erp-fcm.admin-upco.workers.dev';
       const _from2=(function(){
-          // Go back 6 months from currently selected month (not today)
-          // so charts always show correct last-6-months regardless of which month is selected
-          var _cur = (typeof APP!=='undefined' && APP.currentMonth) || '';
-          var _mn = {'Jan':1,'Feb':2,'Mar':3,'Apr':4,'May':5,'Jun':6,'Jul':7,'Aug':8,'Sep':9,'Oct':10,'Nov':11,'Dec':12};
-          var _parts = _cur.split('-');
-          var _m = _mn[_parts[0]] || new Date().getMonth()+1;
-          var _y = _parts[1] ? 2000+parseInt(_parts[1]) : new Date().getFullYear();
-          // Go back 5 more months to get 6 total
-          _m -= 5; if(_m<=0){_m+=12;_y--;}
-          return _y+'-'+String(_m).padStart(2,'0')+'-01';
+          // Always fetch last 7 months from today so any month selection works
+          // Using today's date - no dependency on APP.currentMonth which may not be set
+          var _d = new Date();
+          _d.setMonth(_d.getMonth() - 6);
+          _d.setDate(1);
+          return _d.getFullYear()+'-'+String(_d.getMonth()+1).padStart(2,'0')+'-01';
         })();
       const _ires=await fetch(_iUrl+'?action=read&dept=ALL&fromDate='+_from2+'&_='+Date.now(),{cache:'no-store',redirect:'follow'});
       const _itext=await _ires.text();
@@ -11287,16 +11279,12 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
       try{
         // fromDate = 6 months back from selected month so charts show correct data
         const _sixMonthsAgo=(function(){
-          // Go back 6 months from currently selected month (not today)
-          // so charts always show correct last-6-months regardless of which month is selected
-          var _cur = (typeof APP!=='undefined' && APP.currentMonth) || '';
-          var _mn = {'Jan':1,'Feb':2,'Mar':3,'Apr':4,'May':5,'Jun':6,'Jul':7,'Aug':8,'Sep':9,'Oct':10,'Nov':11,'Dec':12};
-          var _parts = _cur.split('-');
-          var _m = _mn[_parts[0]] || new Date().getMonth()+1;
-          var _y = _parts[1] ? 2000+parseInt(_parts[1]) : new Date().getFullYear();
-          // Go back 5 more months to get 6 total
-          _m -= 5; if(_m<=0){_m+=12;_y--;}
-          return _y+'-'+String(_m).padStart(2,'0')+'-01';
+          // Always fetch last 7 months from today so any month selection works
+          // Using today's date - no dependency on APP.currentMonth which may not be set
+          var _d = new Date();
+          _d.setMonth(_d.getMonth() - 6);
+          _d.setDate(1);
+          return _d.getFullYear()+'-'+String(_d.getMonth()+1).padStart(2,'0')+'-01';
         })();
         const _eres=await fetch('https://up-erp-fcm.admin-upco.workers.dev?action=read&dept=ALL&fromDate='+_sixMonthsAgo+'&_='+Date.now(),{cache:'no-store',redirect:'follow'});
         const _edata=await _eres.json();
@@ -15123,12 +15111,14 @@ function canSeeMaintReq(req){
   const tScope = techTypeScope();
   if(tScope !== null){
     const reqType = String(g(req,'type')||'').trim().toUpperCase();
-    // Match both short codes (ME/EE/UT) and full names (MECHANICAL/ELECTRICAL/UTILITIES)
     const aliases = {ME:['ME','MECHANICAL'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
     return (aliases[tScope]||[tScope]).indexOf(reqType) > -1;
   }
 
-  // Production dept users: filter by request DEPT
+  // Always show requests submitted by this user (regardless of dept)
+  if(g(req,'submittedByUser')===curUser()) return true;
+
+  // Production dept users: show ALL requests from their department
   const scope = userDeptScope();
   if(!scope) return true; // no restriction - see all
   return String(g(req,'dept')||'').trim() === scope;
@@ -15144,7 +15134,17 @@ function canAcceptMaint(){
   return isTech();
 }
 // Can this user fill Stage 3 (production-side closure) for this request?
-function canStage3(r){ return isAdmin()||(canSubmit()&&g(r,'submittedByUser')===curUser()); }
+// Any user from the SAME DEPARTMENT can fill Stage 3 (not just the submitter)
+function canStage3(r){
+  if(isAdmin()) return true;
+  if(!canSubmit()) return false; // tech team cannot fill Stage 3
+  // Same dept as request OR submitted by this user
+  const reqDept = String(g(r,'dept')||'').trim();
+  const myScope = userDeptScope();
+  if(myScope && myScope === reqDept) return true;
+  if(g(r,'submittedByUser')===curUser()) return true;
+  return false;
+}
 // Can this user fill Stage 4 (technical action report)?
 function canStage4(r){ return isAdmin()||(isTech()&&g(r,'assignedToUser')===curUser()); }
 // Can this user confirm/lock (Stage 5)?
@@ -16005,8 +16005,9 @@ function renderMaintQueue(){
     heading='Pending Your Review & Confirmation';
     hint='These requests have been completed and are waiting for your review and confirmation.';
   } else {
-    mine=all.filter(r=>g(r,'submittedByUser')===curUser()&&['ACCEPTED'].includes(g(r,'status')));
-    const s3=all.filter(r=>g(r,'submittedByUser')===curUser()&&g(r,'status')==='ACCEPTED');
+    // Show all ACCEPTED requests from my department (not just ones I submitted)
+    mine=all.filter(r=>canStage3(r)&&['ACCEPTED'].includes(g(r,'status')));
+    const s3=all.filter(r=>canStage3(r)&&g(r,'status')==='ACCEPTED');
     mine=s3;
     heading='Requests Awaiting Your Input (Stage 3)';
     hint='Technical team has accepted these requests. Please log arrival time, closing time, and waste.';
@@ -16065,7 +16066,7 @@ function _actionBtn(r){
   }
   if(isTech()&&g(r,'assignedToUser')===curUser()&&st==='IN_PROGRESS')
     return `<button class="btn btn-primary btn-sm" onclick="window.openMaintStage4('${g(r,'id')}')">📝 File Report</button>`;
-  if(!isTech()&&!isIncharge()&&g(r,'submittedByUser')===curUser()&&st==='ACCEPTED')
+  if(canStage3(r)&&st==='ACCEPTED')
     return `<button class="btn btn-primary btn-sm" onclick="window.openMaintStage3('${g(r,'id')}')">🕐 Log Times</button>`;
   if(isIncharge()&&st==='PENDING_REVIEW'&&(!inchargeTeam()||g(r,'type')===inchargeTeam()))
     return `<button class="btn btn-primary btn-sm" onclick="window.openMaintConfirm('${g(r,'id')}')">✅ Review & Confirm</button>`;
@@ -16156,7 +16157,7 @@ function _buildRows(reqs){
             return '<button class="btn btn-primary btn-sm" onclick="window.openMaintStage4(\'${id}\')">📝 Report</button>';
           if(isIncharge()&&_st==='PENDING_REVIEW')
             return '<button class="btn btn-primary btn-sm" onclick="window.openMaintConfirm(\'${id}\')">✅ Confirm</button>';
-          if(!isTech()&&!isIncharge()&&g(r,'submittedByUser')===curUser()&&_st==='ACCEPTED')
+          if(canStage3(r)&&_st==='ACCEPTED')
             return '<button class="btn btn-primary btn-sm" onclick="window.openMaintStage3(\'${id}\')">🕐 Log Times</button>';
           if(isAdmin())
             return '<button class="btn btn-primary btn-sm" onclick="window.openMaintStage(\'${id}\')">Manage</button>';
