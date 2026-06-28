@@ -15023,6 +15023,28 @@ function userDeptScope(){
   return null; // no restriction
 }
 
+// Get the maintenance TYPE this technical user is scoped to (null = see all types)
+// MECH_INCHARGE -> ME, ELEC_INCHARGE -> EE, UTIL_INCHARGE -> UT
+// TECH_MANAGER dept=MECHANICAL -> ME, dept=ELECTRICAL -> EE, dept=UTILITY -> UT
+// TECH_UTILITY -> UT
+function techTypeScope(){
+  const r = curRole();
+  if(r === 'MECH_INCHARGE') return 'ME';
+  if(r === 'ELEC_INCHARGE') return 'EE';
+  if(r === 'UTIL_INCHARGE') return 'UT';
+  if(/^TECH_(MECHANICAL)$/.test(r)) return 'ME';
+  if(/^TECH_(ELECTRICAL)$/.test(r)) return 'EE';
+  if(/^TECH_(UTILITIES)$/.test(r)) return 'UT';
+  if(r === 'TECH_UTILITY') return 'UT';
+  if(r === 'TECH_MANAGER'){
+    const dept = String(APP?.currentUser?.dept||'').trim().toUpperCase();
+    if(dept === 'MECHANICAL') return 'ME';
+    if(dept === 'ELECTRICAL') return 'EE';
+    if(dept === 'UTILITY' || dept === 'UTILITIES') return 'UT';
+  }
+  return null; // no type restriction
+}
+
 // Is user a production dept incharge (any dept)?
 function isIncharge(){
   if(isAdmin()) return true;
@@ -15041,14 +15063,17 @@ function inchargeTeam(){
 }
 
 // Can user submit a maintenance request?
-// Tech roles CANNOT. Production incharges CAN (only for their dept).
+// Technical team (TECH_*, MECH/ELEC/UTIL_INCHARGE, TECH_MANAGER, TECH_UTILITY) CANNOT submit.
+// Only production incharges and above CAN submit.
 function canSubmit(){
   if(isAdmin()) return true;
   const u=APP?.currentUser;
   if(u && typeof u.canCreateMaintReq === 'boolean') return u.canCreateMaintReq;
   const r=curRole();
-  // TECH roles cannot submit
+  // All technical roles cannot submit requests
   if(/^TECH_(MECHANICAL|ELECTRICAL|UTILITIES)$/.test(r)) return false;
+  if(/^(MECH|ELEC|UTIL)_INCHARGE$/.test(r)) return false;
+  if(r==='TECH_MANAGER'||r==='TECH_UTILITY') return false;
   return true;
 }
 
@@ -15056,6 +15081,17 @@ function canSubmit(){
 function canSeeMaintReq(req){
   if(isAdmin()) return true;
   if(typeof window.isMainAdmin==='function'&&window.isMainAdmin()) return true;
+
+  // Technical team: filter by request TYPE (ME/EE/UT), not production dept
+  const tScope = techTypeScope();
+  if(tScope !== null){
+    const reqType = String(g(req,'type')||'').trim().toUpperCase();
+    // Match both short codes (ME/EE/UT) and full names (MECHANICAL/ELECTRICAL/UTILITIES)
+    const aliases = {ME:['ME','MECHANICAL'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
+    return (aliases[tScope]||[tScope]).indexOf(reqType) > -1;
+  }
+
+  // Production dept users: filter by request DEPT
   const scope = userDeptScope();
   if(!scope) return true; // no restriction - see all
   return String(g(req,'dept')||'').trim() === scope;
@@ -15868,9 +15904,22 @@ window.submitMaintRequest=async function(){
     }
     APP.maintenanceRequests.push(row); cacheReqs(); updateBadge();
     toast('✅ '+notif+' submitted successfully!','success');
-    // FCM: notify dept incharges + tech team + MANAGER
+    // FCM: notify ONLY relevant tech team (by type) + submitting dept + MANAGER
     const _newRow=(APP.maintenanceRequests||[]).find(x=>g(x,'id')===id);
-    if(_newRow) _fcmPush('newRequest', _newRow, {status:'OPEN'});
+    if(_newRow){
+      // targetRoles tells Apps Script which FCM tokens to send to
+      // ME requests -> MECH_INCHARGE, TECH_MECHANICAL, TECH_MANAGER(MECHANICAL)
+      // EE requests -> ELEC_INCHARGE, TECH_ELECTRICAL, TECH_MANAGER(ELECTRICAL)
+      // UT requests -> UTIL_INCHARGE, TECH_UTILITIES, TECH_UTILITY
+      const _typeRoleMap={
+        'ME':['MECH_INCHARGE','TECH_MECHANICAL','TECH_MANAGER'],
+        'EE':['ELEC_INCHARGE','TECH_ELECTRICAL','TECH_MANAGER'],
+        'UT':['UTIL_INCHARGE','TECH_UTILITIES','TECH_UTILITY','TECH_MANAGER'],
+        'PM':['MECH_INCHARGE','ELEC_INCHARGE','UTIL_INCHARGE','TECH_MANAGER']
+      };
+      const _tRoles=_typeRoleMap[String(typeCode||type||'').toUpperCase()]||[];
+      _fcmPush('newRequest', _newRow, {status:'OPEN', targetRoles:_tRoles, reqDept:dept, reqType:typeCode||type});
+    }
     if(typeof window.sendBrowserNotif==='function')
       window.sendBrowserNotif('🔧 New Request ['+priority+']',dept+' / '+type+': '+desc.substring(0,60),'mr-'+id);
     const tabs=document.querySelectorAll('#maint-tabs .tab');
