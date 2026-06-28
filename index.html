@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/erp-dashboard/manifest.json">
+<meta name="theme-color" content="#1f6feb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="UP ERP">
 <title>Universal Packaging - Production Intelligence System V31</title>
 <!-- V31: Full mobile responsive overhaul - slide-over sidebar drawer, backdrop, 768px/480px breakpoints, KPI 2-col, charts single-col, tables scroll, settings stack, login box fluid, header compact on mobile -->
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -21787,7 +21792,9 @@ setTimeout(function(){
       // Register service worker
       if('serviceWorker' in navigator){
         try{
-          await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+          await navigator.serviceWorker.register('/erp-dashboard/firebase-messaging-sw.js', {
+            scope: '/erp-dashboard/'
+          });
           console.log('[FCM] Service worker registered');
         }catch(e){ console.warn('[FCM] SW register failed:', e.message); }
       }
