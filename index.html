@@ -9614,13 +9614,48 @@ function getSourceUrl(params={}){
   return u.toString();
 }
 async function erpApi(params={}, body=null){
-  const url=getSourceUrl(params);
-  debugLog('info','API request', url.replace(/([?&]token=)[^&]+/,'$1***'));
-  const opt=body?{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)}:{method:'GET'};
-  const r=await fetch(url,opt);
-  const text=await r.text();
-  if(!r.ok) throw new Error('HTTP '+r.status+' '+text.slice(0,160));
-  try{return JSON.parse(text);}catch(e){throw new Error('Invalid JSON from Apps Script: '+text.slice(0,160));}
+  // Always POST to avoid CORS issues with GET requests
+  // Apps Script v4.1: POST with action in body, GET params merged into body
+  const ERP_FIXED_URL = 'https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec';
+  const postBody = Object.assign({}, params, body||{});
+  // Map old param names to v4.1 format
+  if(postBody.sheetId && !postBody.action) postBody.action = 'readsystem';
+  if(postBody.tab || postBody.sheetName) {
+    postBody.tab = postBody.tab || postBody.sheetName;
+  }
+  // For SYSTEM_MASTER reads, use readsystem action
+  if(postBody.sheetId === '1_wS3PPXn2YM8hlKQipPhrH1ere4s2wvda-1ETAG1fFM') {
+    postBody.action = 'readsystem';
+  }
+  // For INCHARGE sheets, use read action with dept
+  const INCHARGE_DEPT_MAP = {
+    '1qB9ort3sX3P0fiqyaP2WxEF9KcYwlpIZGWOfn_fxKVs': 'PRINTING',
+    '143EJbfmkpp9XNtfZDot5ydac_Xth8YTHR0iqNWTqSYw': 'INK',
+    '16jILdm69JA-bIJdMuxi4pR6o3qlBJ4z_qNFLrifhxFc': 'LAMINATION',
+    '1Q53yyK6YFTRDq1Fazd6CYHS-4yTczX2OLJCL9cL9_c8': 'SLITTING',
+    '1i26Svbmc-zD4Ul1CkY4RXOTT4ldbCnHGHWEjB7mMirA': 'BAG_MAKING',
+    '1bGNAfSe6L1OlyWP9YfgGE1C3TLXKWTR9Y-BGOMEJyzU': 'QUALITY',
+    '12aZX2Pz0J-sb1s8psnBOs30Dlud1WkYFDXlXtXU03eE': 'DISPATCH',
+    '1KNIVZ5vMtcHJ8UZijXwP8MZ0xi6z5ndR47oBo4viwhs': 'FG'
+  };
+  if(postBody.sheetId && INCHARGE_DEPT_MAP[postBody.sheetId]) {
+    postBody.action = 'read';
+    postBody.dept   = INCHARGE_DEPT_MAP[postBody.sheetId];
+  }
+  debugLog('info','API POST', postBody.action + (postBody.tab ? '/'+postBody.tab : '') + (postBody.dept ? '/'+postBody.dept : ''));
+  try{
+    const r = await fetch(ERP_FIXED_URL, {
+      method : 'POST',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body   : JSON.stringify(postBody),
+      cache  : 'no-store'
+    });
+    const text = await r.text();
+    if(!r.ok) throw new Error('HTTP '+r.status+' '+text.slice(0,160));
+    try{ return JSON.parse(text); }catch(e){ throw new Error('Invalid JSON: '+text.slice(0,160)); }
+  }catch(e){
+    throw new Error('erpApi failed: '+e.message);
+  }
 }
 function rowsFromResponse(json, key){
   if(!json) return [];
