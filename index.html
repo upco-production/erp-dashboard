@@ -1505,20 +1505,17 @@ function renderDashboard(container) {
     return rows.reduce((a,r)=>a+prodKg(r),0) / 1000;
   }
   function bagPcsForMonth(m=month){
+    // getMonthData respects inActiveDateFilter (day/range/month)
+    // For chart trend (m !== month), filter by month only
     const rows = (m === month)
       ? getMonthData('Bag Making')
-      : (APP.productionData||[]).filter(r => r.month===m && r.dept==='Bag Making');
-    return rows
-      .filter(r => {
-        // Only count rows with valid PRODUCTION_DATE matching this month
-        const d = String(r.PRODUCTION_DATE || r.date || '');
-        if(!d || d.length < 7) return false;
-        const rowMonth = upDateToMonthKey(d);
-        return rowMonth === m;
-      })
-      .reduce((a,r)=>{
-        return a + (+(r.PRODUCTION_PCS || r.productionPcs || 0));
-      },0);
+      : (APP.productionData||[]).filter(r=>{
+          if(r.dept !== 'Bag Making') return false;
+          const d = String(r.PRODUCTION_DATE || r.date || '');
+          if(!d || d.length < 7) return false;
+          return upDateToMonthKey(d) === m;
+        });
+    return rows.reduce((a,r)=> a + (+(r.PRODUCTION_PCS || r.productionPcs || 0)), 0);
   }
   // Your DISPATCH_MASTER has ONE quantity column - DISPATCHED (KG) - and
   // category is derived from PLANT/TYPE (Export / UF / UP or blank).
@@ -2855,7 +2852,7 @@ function renderDeptDailyTab(tc, dept){
   const sorted = Object.values(byDate).sort((a,b)=>a.rawDate<b.rawDate?-1:1);
 
   function dispProd(pk){ return isBag?Math.round(pk).toLocaleString()+' PCS':pk.toFixed(1)+' KG'; }
-  function dispMeter(m){ return (m/1e6).toFixed(2)+' Mn M'; }
+  function dispMeter(m){ return Math.round(+(m||0)).toLocaleString()+' m'; }
 
   function jobDetailRows(rows){
     return rows.map(r=>`
@@ -2888,7 +2885,7 @@ function renderDeptDailyTab(tc, dept){
       <div style="overflow-x:auto"><table id="dept-daily-table">
         <thead><tr>
           <th>Date</th>
-          <th>Production (KG / PCS)</th><th>Meters (Mn M)</th>
+          <th>Production (KG / PCS)</th><th>Meters (m)</th>
           <th>Waste KG</th><th>Waste %</th>
           <th>DT (min)</th><th>Records</th>
         </tr></thead>
@@ -2915,7 +2912,7 @@ function renderDeptDailyTab(tc, dept){
                   <thead><tr style="background:rgba(31,111,235,.08);font-size:11px">
                     <th style="padding-left:24px">Machine</th><th>Shift</th><th>Incharge</th>
                     <th>Status</th><th>SFG/PO</th><th style="min-width:180px">Job Name</th>
-                    <th>Production (KG/PCS)</th><th>Meters (Mn M)</th><th>Waste %</th><th>DT</th><th>EE%</th><th>OEE%</th><th></th>
+                    <th>Production (KG/PCS)</th><th>Meters (m)</th><th>Waste %</th><th>DT</th><th>EE%</th><th>OEE%</th><th></th>
                   </tr></thead>
                   <tbody>${jobDetailRows(dt.rows)}</tbody>
                 </table>
@@ -8142,6 +8139,9 @@ function numValue(obj, keys, fallback=0){
 function displayNumValue(obj, keys, fallback=''){
   const v = firstRealValue(obj, keys, fallback);
   if(v === '' || v === null || v === undefined) return fallback;
+  // Round numeric values to max 2 decimal places
+  const n = parseFloat(v);
+  if(!isNaN(n) && String(v).includes('.')) return +n.toFixed(2);
   return v;
 }
 function fieldValue(r,f,dept){
@@ -8157,7 +8157,7 @@ function fieldValue(r,f,dept){
     TOTAL_JOB_TIME_MIN: displayNumValue(r,['TOTAL_JOB_TIME_MIN','totalJobTimeMin']),
     PRODUCTION_KG: displayNumValue(r,['PRODUCTION_KG','productionKg','production']),
     PRODUCTION_PCS: displayNumValue(r,['PRODUCTION_PCS','productionPcs','production']),
-    PRODUCTION_METER: displayNumValue(r,['PRODUCTION_METER','productionMeter']),
+    PRODUCTION_METER: (function(){ const v=+(r.PRODUCTION_METER||r.productionMeter||0); return v?Math.round(v):0; })(),
     PRODUCTION_MIN: displayNumValue(r,['PRODUCTION_MIN','PRODUCTION_RUNNING_MIN','productionMin','runningMin']),
     PRODUCTION_RUNNING_MIN: displayNumValue(r,['PRODUCTION_RUNNING_MIN','PRODUCTION_MIN','productionMin','runningMin']),
     AVERAGE_SPEED: displayNumValue(r,['AVERAGE_SPEED','AVERAGE_SPEED_MM','averageSpeed']),
@@ -8389,7 +8389,7 @@ function buildDeptRequirementKPIs(dept,data){
   const prodValue=isBag?(prod/1000000).toFixed(2)+' M':(prod/1000).toFixed(2)+' T';
   const prodLabel=isBag?'PRODUCTION PCS':'PRODUCTION TONS';
   // Meters: always in Millions
-  const metersVal=(meters/1e6).toFixed(2)+' Mn M';
+  const metersVal=(+(meters||0)/1e6).toFixed(2)+' M';
   return `<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
     ${metricCard(prodLabel,prodValue,FILTER_STATE?.label||APP.currentMonth,'cyan')}
     ${metricCard('PRODUCTION METERS',metersVal,'Production meters (Million)','green')}
@@ -8437,7 +8437,7 @@ function renderMachineCards(dept,data){
         const prodDisplay=isBag?m.productionTons.toFixed(2)+' M':m.productionTons.toFixed(2)+' T';
         const prodLabel=isBag?'Production (PCS)':'Production (Tons)';
         const meters=m.records.reduce((a,r)=>a+(+r.productionMeter||+r.PRODUCTION_METER||0),0);
-        const metersDisp=(meters/1e6).toFixed(2)+' Mn M';
+        const metersDisp=Math.round(+(meters||0)).toLocaleString()+' m';
         const wp=m.production>0?(m.waste/m.production*100):0;
         return `<div class="machine-card">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
@@ -8497,7 +8497,7 @@ renderDeptPage=function(container,dept){
   const oeeA=avg(data,'oee');
   const meters=data.reduce((a,r)=>a+(+r.productionMeter||+r.PRODUCTION_METER||0),0);
   const dispProd=isBag?Math.round(prod).toLocaleString()+' PCS':(prod/1000).toFixed(2)+' T';
-  const dispM=(meters/1e6).toFixed(2)+' Mn M';
+  const dispM=Math.round(+(meters||0)).toLocaleString()+' m';
   const prev=APP.productionData.filter(x=>x.month===getPrevMonth(APP.currentMonth)&&x.dept===dept);
   const chg=sum(prev,'production')>0?((prod-sum(prev,'production'))/sum(prev,'production')*100):0;
   container.innerHTML=`
@@ -8531,7 +8531,7 @@ switchDeptTab=function(tab,el,dept){
     const eeA=avg(data,'ee'); const oeeA=avg(data,'oee');
     const meters=data.reduce((a,r)=>a+(+r.productionMeter||+r.PRODUCTION_METER||0),0);
     const dispProd=isBag?Math.round(prod).toLocaleString()+' PCS':(prod/1000).toFixed(2)+' T';
-    const dispM=(meters/1e6).toFixed(2)+' Mn M';
+    const dispM=Math.round(+(meters||0)).toLocaleString()+' m';
     const prev=APP.productionData.filter(x=>x.month===getPrevMonth(APP.currentMonth)&&x.dept===dept);
     const chg=sum(prev,'production')>0?((prod-sum(prev,'production'))/sum(prev,'production')*100):0;
     tc.innerHTML=deptMachineTabHTML(dept,data,{prod,waste,wasteP,dt,eeA,oeeA,dispProd,dispM,chg,isBag,meters});
@@ -8581,8 +8581,8 @@ function deptMachineTabHTML(dept,data,s){
   const prodVal    = s.isBag ? (s.prod/1e6) : (s.prod/1000);
   const prodUnit   = s.isBag ? 'M PCS' : 'Tons';
   const prodTgtLbl = s.isBag ? prodTarget.toFixed(2)+' M' : prodTarget.toFixed(0)+' T';
-  const metersM    = s.meters/1e6;
-  const metersUnit = 'Mn M';
+  const metersM    = s.meters / 1e6;  // convert to millions
+  const metersUnit = 'M';
   const metersDisp = metersM.toFixed(2)+' '+metersUnit;
 
   // -- helper: full kpi card with badge + progress bar ----------------------
@@ -11425,9 +11425,9 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
         const _allRows=(_edata.ok&&_edata.rows)?_edata.rows:[];
         log('ok','INCHARGE/ALL',_allRows.length+' rows (from '+_sixMonthsAgo+')');
         const _prod=_allRows.filter(r=>['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].includes(String(r.__DEPT||'').toUpperCase()));
-        APP.productionData=_prod.map(r=>{
+        APP.productionData=dedupProductionData(_prod.map(r=>{
           try{ return upNormalizeProductionByTab(r, r.__DEPT+'_IMPORT'); }catch(e){ return r; }
-        });
+        }));
         // Save to SDC cache so locked months stay available after re-lock
         if(typeof sdcSave==='function') setTimeout(function(){ try{ sdcSave(APP.productionData); }catch(e){} }, 300);
         APP.inkData       =_allRows.filter(r=>String(r.__DEPT||'')==='INK').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.PRODUCTION_DATE||'')}));
@@ -12084,7 +12084,7 @@ navigate = (function(orig){
     const prodValue=isBag?(prod/1000000).toFixed(2)+' M':(prod/1000).toFixed(2)+' T';
     const prodLabel=isBag?'PRODUCTION PCS':'PRODUCTION TONS';
     // Meters in Millions
-    const metersVal=(meters/1e6).toFixed(2)+' Mn M';
+    const metersVal=(+(meters||0)/1e6).toFixed(2)+' M';
     const wasteCard = dept==='Printing'
       ? metricCard('% WASTE',pct2(wastePct),'Printing technical wastage: technical waste KG / production KG × 100',wastePct<=5?'green':'red')
       : metricCard('TOTAL WASTE KG',kg1(waste),'Actual waste in KG',waste<=0?'green':'red');
@@ -12312,7 +12312,7 @@ navigate = (function(orig){
     const prodLabel = isBag ? 'PRODUCTION M PCS' : 'PRODUCTION TONS';
     const prodValue = isBag ? (prod/1000000).toFixed(2)+' M' : (prodKg ? (prodKg/1000).toFixed(2) : r2(prod/1000).toFixed(2))+' T';
     // Meters in Millions
-    const metersVal = (meterTotal/1e6).toFixed(2)+' Mn M';
+    const metersVal = (+(meterTotal||0)/1e6).toFixed(2)+' M';
     return `<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
       ${metricCard(prodLabel,prodValue,FILTER_STATE?.label||APP.currentMonth,'cyan')}
       ${metricCard('PRODUCTION METERS',metersVal,'Production meters (Million)','green')}
@@ -19483,6 +19483,19 @@ function lsSet(key, val){
 }
 
 // -- Save: split productionData into frozen + live --------------------------
+
+// Deduplicate production data by __DEPT + __ROW
+function dedupProductionData(rows){
+  if(!Array.isArray(rows)) return rows;
+  var seen = {};
+  return rows.filter(function(r){
+    var key = (r.__DEPT||r.dept||'') + '-' + (r.__ROW||'') + '-' + (r.PRODUCTION_DATE||r.date||'');
+    if(seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
+}
+
 function sdcSave(allRows){
   if(!Array.isArray(allRows) || !allRows.length) return;
   var currentMonth = todayMonthKey();
@@ -19666,11 +19679,11 @@ setTimeout(function(){
     // Always inject SDC rows — locked months still needed for charts (read-only)
     var existing = window.APP && APP.productionData;
     if(!Array.isArray(existing) || existing.length === 0){
-      if(window.APP) APP.productionData = sdcRows;
+      if(window.APP) APP.productionData = dedupProductionData(sdcRows);
       console.log('[SDC] Startup inject: ' + sdcRows.length + ' rows into APP.productionData');
     } else if(sdcRows.length > existing.length){
       // SDC has MORE rows (includes frozen months) - use it
-      if(window.APP) APP.productionData = sdcRows;
+      if(window.APP) APP.productionData = dedupProductionData(sdcRows);
       console.log('[SDC] Startup replace: ' + sdcRows.length + ' rows (SDC > UPC: ' + existing.length + ')');
     }
   }catch(e){
@@ -19908,7 +19921,7 @@ window.syncSingleRow = async function(dateRaw, dept){
     // Add fresh rows
     var merged = filtered.concat(newRows);
 
-    if(window.APP) APP.productionData = merged;
+    if(window.APP) APP.productionData = dedupProductionData(merged);
 
     // -- Update SDC live cache ------------------------------------------
     try{
