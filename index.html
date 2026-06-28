@@ -3920,11 +3920,38 @@ function normPlanRow(r){
     tolDispatch: num('_TOLERANCE_DISPATCH','% Tolerance (DISPATCH)','TOLERANCE_DISPATCH','TOL_DISPATCH','tolDispatch'),
     remarks    : n('REMARKS','Remarks','REMARK','remarks'),
     inFgStock  : num('IN_FG_STOCK_KG','IN FG STOCK (KG)','IN_FG_STOCK','FG_STOCK_KG','inFgStock'),
+    jobType    : n('JOB_TYPE','Job Type','JOB TYPE'),  // REEL or BAG — from MATERIAL_MASTER Col G
     lam1       : num('FRIST_LAMINATION_PRODUCTION','FIRST_LAMINATION_PRODUCTION','LAM1','LAMINATION_1','lam1'),
     lam2       : num('SECOND_LAMINATION_PRODUCTION','LAM2','LAMINATION_2','lam2'),
     lam3       : num('THIRD_LAMINATION_PRODUCTION','LAM3','LAMINATION_3','lam3'),
     lam4       : num('FOURTH_LAMINATION_PRODUCTION','LAM4','LAMINATION_4','lam4'),
   };
+}
+
+// ── Job type: REEL vs BAG from MATERIAL_MASTER Col G ────────────────────────
+function jptJobTypeBadgeCol(jt){
+  return jt==='BAG'?'var(--green)':jt==='REEL'?'var(--cyan)':'var(--text3)';
+}
+function jptGetJobType(planRow){
+  if(planRow.jobType && planRow.jobType.trim()) return planRow.jobType.trim().toUpperCase();
+  const matData = APP.materialData || [];
+  const fgCode  = String(planRow.fgCode || planRow.sfgCode || '').trim().toUpperCase();
+  if(fgCode && matData.length){
+    const matRow = matData.find(m=>{
+      const mc = String(m.JOB_TYPE||m.MATERIAL_CODE||m.MATERIAL||'').trim().toUpperCase();
+      // Find by material code match
+      const mCode = String(m.MATERIAL_CODE||m.MATERIAL||m.ER_CODE||m.A||'').trim().toUpperCase();
+      return mCode && mCode === fgCode;
+    });
+    if(matRow){
+      const jt = String(matRow.JOB_TYPE||matRow.G||'').trim().toUpperCase();
+      if(jt) return jt;
+    }
+  }
+  return planRow.bagQtyKg > 0 ? 'BAG' : 'REEL';
+}
+function jptLastProductionStage(planRow){
+  return jptGetJobType(planRow) === 'BAG' ? 'Bag Making' : 'Slitting';
 }
 
 // ── WIP KG for an order = last non-zero lamination balance ───────────────
@@ -4080,7 +4107,7 @@ function renderJobTracker(container){
       <div class="tab active" onclick="jptSwitchTab('overview',this)">📊 Executive View</div>
       <div class="tab" onclick="jptSwitchTab('running',this)">🚀 Running Orders <span class="badge badge-orange" style="font-size:9px;margin-left:4px">${runCount}</span></div>
       <div class="tab" onclick="jptSwitchTab('orders',this)">📋 All Orders</div>
-      <div class="tab" onclick="jptSwitchTab('wip',this)">📦 WIP & FG Stock</div>
+      <div class="tab" onclick="jptSwitchTab('wip',this)">📦 WIP Summary</div>
     </div>
     <div id="jpt-tab-content">${jptRenderOverview(allRows)}</div>`;
   setTimeout(()=>jptDrawOverviewChart(allRows),120);
@@ -4632,6 +4659,7 @@ function normWIPRow(r){
     printBalance : num('PRINTING_BALANCE_KG'),   // Printed WIP
     lamBalance   : num('LAMINATION_BALANCE_KG'), // Laminated WIP
     slitBalance  : num('SLITTING_BALANCE_KG'),   // Slitted WIP
+    bagBalance   : num('SLITTING_USED_BY_BAG_KG','BAG_MAKING_WIP_KG','BAG_BALANCE_KG'), // Bag WIP
     totalWIP     : num('TOTAL_WIP_KG'),          // Sum (Apps Script computed)
     dispatchQty  : num('DISPATCH_QTY_KG'),
     varianceKg   : num('VARIANCE_KG'),
@@ -4677,6 +4705,8 @@ function jptRenderWIP(allPlanRows){
   const ordsPrint  = rows.filter(r=>r.printBalance>0).length;
   const ordsLam    = rows.filter(r=>r.lamBalance>0).length;
   const ordsSlit   = rows.filter(r=>r.slitBalance>0).length;
+  const bagWIP     = rows.reduce((a,r)=>a+(r.bagBalance||0),0);
+  const ordsBag    = rows.filter(r=>(r.bagBalance||0)>0).length;
 
   // ── Status breakdown ──────────────────────────────────────────────────
   const isActive=r=>{ const u=String(r.status||'').toUpperCase().replace(/\s+/g,' '); return u==='IN PROGRESS'||u==='IN PROGESS'; };
@@ -4709,27 +4739,33 @@ function jptRenderWIP(allPlanRows){
 
     <!-- SECTION 1 — WIP KPI CARDS -->
     <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">Work In Progress — By Production Stage</div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">
-      <div style="background:var(--bg2);border:1px solid var(--border);border-top:3px solid var(--cyan);border-radius:10px;padding:14px;text-align:center">
-        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:5px">Total WIP</div>
-        <div style="font-size:28px;font-weight:800;color:var(--cyan);font-family:'Rajdhani',sans-serif;line-height:1">${big(totalWIPKg)}</div>
-        <div style="font-size:10px;color:var(--text3);margin-top:4px">${totalWIPKg.toFixed(0)} KG</div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-top:3px solid var(--cyan);border-radius:8px;padding:10px 12px">
+        <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Total WIP</div>
+        <div style="font-size:22px;font-weight:800;color:var(--cyan);font-family:'Rajdhani',sans-serif;line-height:1">${big(totalWIPKg)}</div>
+        <div style="font-size:9px;color:var(--text3);margin-top:3px">${totalWIPKg.toFixed(0)} KG · ${rows.length} orders</div>
       </div>
-      <div style="background:var(--bg2);border:1px solid var(--border);border-top:3px solid #58a6ff;border-radius:10px;padding:14px;text-align:center">
-        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:5px">🖨 Printed WIP</div>
-        <div style="font-size:28px;font-weight:800;color:#58a6ff;font-family:'Rajdhani',sans-serif;line-height:1">${big(printWIP)}</div>
-        <div style="font-size:10px;color:var(--text3);margin-top:4px">${ordsPrint} orders · awaiting Lamination</div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-top:3px solid #58a6ff;border-radius:8px;padding:10px 12px">
+        <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">🖨 Printed WIP</div>
+        <div style="font-size:22px;font-weight:800;color:#58a6ff;font-family:'Rajdhani',sans-serif;line-height:1">${big(printWIP)}</div>
+        <div style="font-size:9px;color:var(--text3);margin-top:3px">${ordsPrint} orders · awaiting Lam</div>
       </div>
-      <div style="background:var(--bg2);border:1px solid var(--border);border-top:3px solid var(--orange);border-radius:10px;padding:14px;text-align:center">
-        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:5px">🔗 Laminated WIP</div>
-        <div style="font-size:28px;font-weight:800;color:var(--orange);font-family:'Rajdhani',sans-serif;line-height:1">${big(lamWIP)}</div>
-        <div style="font-size:10px;color:var(--text3);margin-top:4px">${ordsLam} orders · awaiting Slitting</div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-top:3px solid var(--orange);border-radius:8px;padding:10px 12px">
+        <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">🔗 Laminated WIP</div>
+        <div style="font-size:22px;font-weight:800;color:var(--orange);font-family:'Rajdhani',sans-serif;line-height:1">${big(lamWIP)}</div>
+        <div style="font-size:9px;color:var(--text3);margin-top:3px">${ordsLam} orders · awaiting Slit</div>
       </div>
-      <div style="background:var(--bg2);border:1px solid var(--border);border-top:3px solid var(--yellow);border-radius:10px;padding:14px;text-align:center">
-        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:5px">✂️ Slitted WIP</div>
-        <div style="font-size:28px;font-weight:800;color:var(--yellow);font-family:'Rajdhani',sans-serif;line-height:1">${big(slitWIP)}</div>
-        <div style="font-size:10px;color:var(--text3);margin-top:4px">${ordsSlit} orders · awaiting next stage</div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-top:3px solid var(--yellow);border-radius:8px;padding:10px 12px">
+        <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">✂️ Slitted WIP</div>
+        <div style="font-size:22px;font-weight:800;color:var(--yellow);font-family:'Rajdhani',sans-serif;line-height:1">${big(slitWIP)}</div>
+        <div style="font-size:9px;color:var(--text3);margin-top:3px">${ordsSlit} orders · awaiting BM/Disp</div>
       </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-top:3px solid var(--green);border-radius:8px;padding:10px 12px">
+        <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">👜 Bag WIP</div>
+        <div style="font-size:22px;font-weight:800;color:var(--green);font-family:'Rajdhani',sans-serif;line-height:1">${big(bagWIP)}</div>
+        <div style="font-size:9px;color:var(--text3);margin-top:3px">${ordsBag} orders · awaiting Dispatch</div>
+      </div>
+    </div>
 
     <!-- SECTION 2 — ORDER STATUS + STAGE DISTRIBUTION -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
@@ -4812,13 +4848,15 @@ function jptRenderWIP(allPlanRows){
         <thead><tr>
           <th>SFG Order</th>
           <th>FG Material</th>
-          <th style="min-width:180px">Description</th>
+          <th>Job Type</th>
+          <th style="min-width:160px">Description</th>
           <th>Order Qty KG</th>
           <th>Status</th>
           <th>Current Stage</th>
           <th style="color:#58a6ff">Printed WIP KG</th>
           <th style="color:var(--orange)">Lam WIP KG</th>
           <th style="color:var(--yellow)">Slitted WIP KG</th>
+          <th style="color:var(--green)">Bag WIP KG</th>
           <th style="color:var(--cyan)">Total WIP KG</th>
           <th>Variance %</th>
         </tr></thead>
@@ -4834,9 +4872,11 @@ function jptRenderWIP(allPlanRows){
             const key=encodeURIComponent(JSON.stringify({sfgOrder:r.order,fgOrder:r.material,matDesc:r.matDesc}));
             const sc=stageCol(r.currentStage);
             const vCol=Math.abs(r.variancePct)>20?'var(--red)':Math.abs(r.variancePct)>10?'var(--orange)':'var(--text3)';
+            const jobType = plan ? jptGetJobType(plan) : (r.bagBalance>0?'BAG':'REEL');
             const hasPrint=r.printBalance>0;
             const hasLam=r.lamBalance>0;
             const hasSlit=r.slitBalance>0;
+            const hasBag=(r.bagBalance||0)>0;
             const hasVar=Math.abs(r.variancePct)>10;
             return `<tr class="wip-row" data-print="${hasPrint}" data-lam="${hasLam}" data-slit="${hasSlit}" data-variance="${hasVar}"
               data-status="${String(r.status||'').toUpperCase().replace(/\s+/g,' ')}"
@@ -4844,18 +4884,20 @@ function jptRenderWIP(allPlanRows){
               style="cursor:pointer;border-left:3px solid ${sc}" onclick="jptWIPDrillDown('${key}',${i})" title="Click to expand">
               <td style="font-family:monospace;font-size:10px;color:var(--cyan);font-weight:600">${safeText(r.order)}</td>
               <td style="font-family:monospace;font-size:10px;color:var(--text3)">${fgMaterial}</td>
-              <td style="font-weight:600;min-width:180px;word-break:break-word;white-space:normal;max-width:220px">${safeText(r.matDesc)||'—'}</td>
+              <td style="font-size:9px;font-weight:700;color:${jptJobTypeBadgeCol(jobType)};text-align:center">${jobType||'—'}</td>
+              <td style="font-weight:600;min-width:160px;word-break:break-word;white-space:normal;max-width:200px">${safeText(r.matDesc)||'—'}</td>
               <td style="font-family:monospace">${orderQtyDisp}</td>
               <td>${wipStatusBadge(r.status)}</td>
               <td style="font-size:10px;color:${sc};font-weight:600">${safeText(r.currentStage)||'—'}</td>
               <td class="${hasPrint?'fw6':''}" style="color:${hasPrint?'#58a6ff':'var(--text3)'}">${hasPrint?r.printBalance.toFixed(1):'—'}</td>
               <td class="${hasLam?'fw6':''}"   style="color:${hasLam?'var(--orange)':'var(--text3)'}">${hasLam?r.lamBalance.toFixed(1):'—'}</td>
               <td class="${hasSlit?'fw6':''}"  style="color:${hasSlit?'var(--yellow)':'var(--text3)'}">${hasSlit?r.slitBalance.toFixed(1):'—'}</td>
+              <td class="${hasBag?'fw6':''}"  style="color:${hasBag?'var(--green)':'var(--text3)'}">${hasBag?(r.bagBalance||0).toFixed(1):'—'}</td>
               <td class="${r.totalWIP>0?'fw6':''}" style="color:${r.totalWIP>0?'var(--cyan)':'var(--text3)'}">${r.totalWIP>0?r.totalWIP.toFixed(1):'—'}</td>
               <td style="font-weight:600;color:${vCol}">${r.variancePct!==0?(r.variancePct>0?'+':'')+r.variancePct.toFixed(1)+'%':'—'}</td>
             </tr>
             <tr id="jpt-wip-drill-${i}" style="display:none">
-              <td colspan="11" style="padding:0;background:var(--bg2)">
+              <td colspan="13" style="padding:0;background:var(--bg2)">
                 <div id="jpt-wip-drill-content-${i}" style="padding:12px"></div>
               </td>
             </tr>`;
@@ -4863,10 +4905,11 @@ function jptRenderWIP(allPlanRows){
         </tbody>
         <tfoot style="background:var(--bg3)">
           <tr style="font-weight:700;font-size:11px">
-            <td colspan="6" style="padding:6px 10px;text-align:right;color:var(--text2)">TOTALS →</td>
+            <td colspan="7" style="padding:6px 10px;text-align:right;color:var(--text2)">TOTALS →</td>
             <td style="color:#58a6ff">${printWIP.toFixed(1)}</td>
             <td style="color:var(--orange)">${lamWIP.toFixed(1)}</td>
             <td style="color:var(--yellow)">${slitWIP.toFixed(1)}</td>
+            <td style="color:var(--green)">${bagWIP.toFixed(1)}</td>
             <td style="color:var(--cyan)">${totalWIPKg.toFixed(1)}</td>
             <td></td>
           </tr>
@@ -14510,21 +14553,34 @@ console.log('[UP ERP V25] Detail report fix applied — renderDeptRows direct re
     var btn = document.getElementById('fg-sync-btn');
     if(btn){ btn.disabled=true; btn.textContent='⏳ Syncing...'; }
     try{
-      const openMonths = sseGetOpenMonths();
-      const fromDate   = sseMonthToFromDate(openMonths);
+      // Fetch FG directly — no date filter (FG is stock snapshot, not time-series)
       var u = new URL(PROXY_URL);
-      u.searchParams.set('action','read'); u.searchParams.set('dept','FG');
-      if(fromDate) u.searchParams.set('fromDate', fromDate);
+      u.searchParams.set('action','read');
+      u.searchParams.set('dept','FG');
       u.searchParams.set('_', Date.now());
       var res  = await fetch(u.toString(), {cache:'no-store', redirect:'follow'});
       var text = await res.text();
       var json; try{ json=JSON.parse(text); }catch(e){ throw new Error('Non-JSON: '+text.slice(0,60)); }
       if(json.rows && json.rows.length){
         APP.fgData = json.rows;
+        // Clear old FG cache, save fresh data, force re-render
+        if(typeof saveFGCache === 'function'){
+          saveFGCache(json.rows.map(function(r){
+            // normFG may not be in scope here — save raw rows, fetchFGFromSheet will normalize
+            return r;
+          }));
+        } else {
+          // Manually clear cache so refreshFGStock fetches fresh
+          try{ localStorage.removeItem('upc_fg_v2'); }catch(e){}
+        }
         toast('FG Stock synced — '+json.rows.length+' rows','success');
-        // Re-render FG tab
-        var wrapper = document.getElementById('fg-dispatch-wrapper');
-        if(wrapper && typeof window.renderFGStock==='function') window.renderFGStock(wrapper);
+        // Force re-render with new data (forceRefresh=true bypasses cache check)
+        if(typeof window.refreshFGStock === 'function'){
+          await window.refreshFGStock(true);
+        } else {
+          var wrapper = document.getElementById('fg-dispatch-wrapper');
+          if(wrapper && typeof window.renderFGStock==='function') window.renderFGStock(wrapper);
+        }
       } else {
         toast('FG: 0 rows returned','warn');
       }
@@ -17381,9 +17437,12 @@ function fgCacheAge(){
 
 // ── Data fetch — only called when cache is stale or force-refreshed ───────
 async function fetchFGFromSheet(){
-  // 1. Try APP.fgData (already loaded by syncAllSheets)
+  // 1. Try APP.fgData (already loaded by syncAllSheets / fgSyncNow)
   if(Array.isArray(APP.fgData) && APP.fgData.length){
-    return APP.fgData.map(normFG).filter(r=>r.materialCode||r.totalKg>0||r.materialDesc);
+    const normalized = APP.fgData.map(normFG).filter(r=>r.materialCode||r.totalKg>0||r.materialDesc);
+    // Save to cache so next render is instant
+    if(normalized.length) saveFGCache(normalized);
+    return normalized;
   }
   // 2. Direct fetch as fallback
   const sheetId = APP.settings.fgSheetId || '1v3ueUtYiuA5VNDmP3vsF5sH0fxyzIgZNfETGzt-eZ4s';
@@ -17431,7 +17490,7 @@ function normFG(r){
   const colI = byName('MATERIAL_GROUP','MATERIAL GROUP','Material Group','I') ?? '';
   const colJ = parseFloat(byName('TOTAL_KG','TOTAL KG','Total KG','J') ?? byName('QTY','QUANTITY','STOCK_QTY') ?? 0) || 0;
   // COL N = PCS / Meters — extracted directly, no Col E criteria applied
-  const colNRaw = byName('PCS_METERS','PCS/METERS','PCS / METERS','PCS METERS','N');
+  const colNRaw = byName('PCS_METERS','PCS__METERS','PCS/METERS','PCS / METERS','PCS METERS','PCS_MTR','N');
   const colN = parseFloat(colNRaw ?? 0) || 0;
   // Customer — blank rows grouped under "No Customer Mentioned" so no data is lost
   const customerRaw = byName('CUSTOMER','CUSTOMER_NAME','PARTY','PARTY_NAME') ?? '';
