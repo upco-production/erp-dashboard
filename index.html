@@ -979,7 +979,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 var APP = {
   currentUser: null,
   currentPage: 'dashboard',
-  currentMonth: 'Apr-26',
+  currentMonth: 'Jun-26',
   sidebarCollapsed: false,
   
   users: [
@@ -1225,7 +1225,7 @@ function startClock() {
 // NAVIGATION
 // =============================================
 function buildMonthChips(){
-  const months=['Apr-26','Mar-26','Feb-26','Jan-26','Dec-25','Nov-25','Oct-25','Sep-25','Aug-25','Jul-25','Jun-25','May-25','Apr-25','Mar-25','Feb-25','Jan-25'];
+  const months=['Dec-26','Nov-26','Oct-26','Sep-26','Aug-26','Jul-26','Jun-26','May-26','Apr-26','Mar-26','Feb-26','Jan-26','Dec-25','Nov-25','Oct-25','Sep-25','Aug-25','Jul-25','Jun-25','May-25','Apr-25','Mar-25','Feb-25','Jan-25'];
   const c=document.getElementById('month-chips');
   c.innerHTML=months.map(m=>`<div class="chip${m===APP.currentMonth?' active':''}" onclick="selectMonth('${m}')">${m}</div>`).join('');
 }
@@ -1901,14 +1901,14 @@ function deptColor(dept){
 }
 
 function getLast6Months(current){
-  const all=['Jan-25','Feb-25','Mar-25','Apr-25','May-25','Jun-25','Jul-25','Aug-25','Sep-25','Oct-25','Nov-25','Dec-25','Jan-26','Feb-26','Mar-26','Apr-26'];
+  const all=['Jan-25','Feb-25','Mar-25','Apr-25','May-25','Jun-25','Jul-25','Aug-25','Sep-25','Oct-25','Nov-25','Dec-25','Jan-26','Feb-26','Mar-26','Apr-26','May-26','Jun-26','Jul-26','Aug-26','Sep-26','Oct-26','Nov-26','Dec-26'];
   const idx=all.indexOf(current);
   if(idx<0) return all.slice(-6);
   return all.slice(Math.max(0,idx-5),idx+1);
 }
 
 function getPrevMonth(current){
-  const all=['Jan-25','Feb-25','Mar-25','Apr-25','May-25','Jun-25','Jul-25','Aug-25','Sep-25','Oct-25','Nov-25','Dec-25','Jan-26','Feb-26','Mar-26','Apr-26'];
+  const all=['Jan-25','Feb-25','Mar-25','Apr-25','May-25','Jun-25','Jul-25','Aug-25','Sep-25','Oct-25','Nov-25','Dec-25','Jan-26','Feb-26','Mar-26','Apr-26','May-26','Jun-26','Jul-26','Aug-26','Sep-26','Oct-26','Nov-26','Dec-26'];
   const idx=all.indexOf(current);
   return idx>0?all[idx-1]:all[0];
 }
@@ -5613,7 +5613,7 @@ function renderAllDataMaster(){
       <input type="text" id="master-search" placeholder="Search any field..." style="flex:1" oninput="masterSearch()">
       <select id="master-month" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none">
         <option value="">All Months</option>
-        ${['Apr-26','Mar-26','Feb-26','Jan-26','Dec-25','Nov-25'].map(m=>`<option ${m===APP.currentMonth?'selected':''}>${m}</option>`).join('')}
+        ${['Dec-26','Nov-26','Oct-26','Sep-26','Aug-26','Jul-26','Jun-26','May-26','Apr-26','Mar-26','Feb-26','Jan-26','Dec-25','Nov-25','Oct-25','Sep-25','Aug-25','Jul-25','Jun-25','May-25','Apr-25','Mar-25','Feb-25','Jan-25'].map(m=>`<option ${m===APP.currentMonth?'selected':''}>${m}</option>`).join('')}
       </select>
       <select id="master-dept" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none">
         <option value="">All Depts</option>
@@ -7823,7 +7823,7 @@ function saveNCR(){
 // Feature 3: Default filter = Today on login; localStorage restores later for returning users
 const _todayInit = (function(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
 const FILTER_STATE = { type: 'day', value: _todayInit, label: 'Today', dateFrom: _todayInit, dateTo: _todayInit };
-const ALL_MONTHS = ['Jan-25','Feb-25','Mar-25','Apr-25','May-25','Jun-25','Jul-25','Aug-25','Sep-25','Oct-25','Nov-25','Dec-25','Jan-26','Feb-26','Mar-26','Apr-26','May-26'];
+const ALL_MONTHS = ['Jan-25','Feb-25','Mar-25','Apr-25','May-25','Jun-25','Jul-25','Aug-25','Sep-25','Oct-25','Nov-25','Dec-25','Jan-26','Feb-26','Mar-26','Apr-26','May-26','Jun-26','Jul-26','Aug-26','Sep-26','Oct-26','Nov-26','Dec-26'];
 const MP_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 let mpYear = 2026;
 
@@ -8048,7 +8048,7 @@ const DEPT_DETAIL_FIELDS = {
   'Slitting':['PRODUCTION_DATE','SHIFT','SHIFT_INCHARGE','SAP_STATUS','MACHINE_NO','SAP_SFG_NO','JOB_NAME','NO_OF_JOB_SETTING','TOTAL_JOB_TIME_MIN','PRODUCTION_KG','PRODUCTION_METER','PRODUCTION_RUNNING_MIN','AVERAGE_SPEED','RHI','EE_PCT','OEE_PCT','TRIM_WASTE','EXTRA_TRIM_WASTE','PROCESS_WASTE','PRINT_WASTE','LAMINATION_WASTE','TECHNICAL_WASTE','TOTAL_WASTE','TOTAL_WASTE_PCT','PROCESS_DOWNTIME_MIN','MECHANICAL_DOWNTIME_MIN','ELECTRICAL_DOWNTIME_MIN','UTILITIES_DOWNTIME_MIN','PREVENTIVE_MAINTENANCE_MIN','TOTAL_TECHNICAL_DOWNTIME_MIN','PLANNING_DOWNTIME_MIN','UNPLANNED_DOWNTIME_MIN','MOTHER_REEL_INPUT','REMARKS','CREATED_BY','CREATED_AT'],
   'Bag Making':['PRODUCTION_DATE','SHIFT','SHIFT_INCHARGE','SAP_STATUS','MACHINE_NO','SAP_SFG_NO','JOB_NAME','NO_OF_JOB_SETTING','TOTAL_JOB_TIME_MIN','PRODUCTION_PCS','PRODUCTION_KG','PRODUCTION_METER','PRODUCTION_RUNNING_MIN','AVERAGE_SPEED','RHI','EE_PCT','OEE_PCT','JOB_SETTING_KG','PROCESS_WASTAGE_KG','SORTING_WASTE_KG','PUNCH_WASTE_KG','TRIM_WASTE_KG','SLITTING_WASTE_KG','PRINTING_WASTE_KG','LAMINATE_WASTE_KG','TOTAL_WASTE_KG','TOTAL_WASTE_PCT','WASTAGE_IN_PCS','TOTAL_PCS_WASTE_PCT','TECHNICAL_WASTE_KG','PROCESS_DOWNTIME_MIN','MECHANICAL_DOWNTIME_MIN','ELECTRICAL_DOWNTIME_MIN','UTILITIES_DOWNTIME_MIN','PREVENTIVE_MAINTENANCE_MIN','TOTAL_TECHNICAL_DOWNTIME_MIN','PLANNING_DOWNTIME_MIN','UNPLANNED_DOWNTIME_MIN','INPUT_MATERIAL_KG','ZIPPER_WEIGHT','SIDE_GUSSET_WEIGHT','REMARKS','CREATED_BY','CREATED_AT']
 };
-function parseMonthKey(m){ const [mon,yy]=(m||APP.currentMonth||'May-26').split('-'); return {mon, year:2000+(+yy||26)}; }
+function parseMonthKey(m){ const [mon,yy]=(m||APP.currentMonth||'Jun-26').split('-'); return {mon, year:2000+(+yy||26)}; }
 function monthIndex(mon){ return MP_MONTHS.indexOf(mon); }
 function keyFromISO(iso){ const d=new Date(iso+'T00:00:00'); return MP_MONTHS[d.getMonth()]+'-'+String(d.getFullYear()).slice(2); }
 function recordDateISO(r){
@@ -11069,7 +11069,7 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
     return isNaN(d)?null:d;
   }
   const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  function monthKeyFromDate(raw){ const d=parseDateAny(raw); return d?MONTHS[d.getMonth()]+'-'+String(d.getFullYear()).slice(2):(APP.currentMonth||'May-26'); }
+  function monthKeyFromDate(raw){ const d=parseDateAny(raw); return d?MONTHS[d.getMonth()]+'-'+String(d.getFullYear()).slice(2):(APP.currentMonth||'Jun-26'); }
   function isoFromDate(raw){ const d=parseDateAny(raw); if(!d) return ''; return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
   function monthNumber(key){ const [m,y]=String(key||'').split('-'); const mi=MONTHS.indexOf(m); return (2000+(+y||0))*12+mi; }
   function latestMonth(rows){
@@ -16014,9 +16014,18 @@ function _actionBtn(r){
   const st=g(r,'status');
   if(st==='LOCKED') return '';
   if(isAdmin()) return `<button class="btn btn-primary btn-sm" onclick="window.openMaintStage('${g(r,'id')}')">Manage</button>`;
-  if(canAcceptMaint()&&(isAdmin()||(isTech()&&g(r,'type')===roleToTypeCode(curRole())))&&st==='OPEN')
-    return `<button class="btn btn-primary btn-sm" onclick="window.acceptMaintRequest('${g(r,'id')}')">✅ Accept</button>
-            <button class="btn btn-danger btn-sm" onclick="window.openRejectModal('${g(r,'id')}')">❌ Reject</button>`;
+  // Accept/Reject: visible if canAcceptMaint() AND request type matches user's tech scope
+  if(canAcceptMaint()&&st==='OPEN'){
+    const _ts=typeof techTypeScope==='function'?techTypeScope():null;
+    const _tc=typeof roleToTypeCode==='function'?roleToTypeCode(curRole()):null;
+    const _reqType=String(g(r,'type')||'').toUpperCase();
+    const _typeAliases={ME:['ME','MECHANICAL'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
+    // If user has a type scope, request must match it. Admins/managers see all.
+    const _typeMatch = !_ts || (_typeAliases[_ts]||[_ts]).indexOf(_reqType)>-1;
+    if(isAdmin()||_typeMatch)
+      return `<button class="btn btn-primary btn-sm" onclick="window.acceptMaintRequest('${g(r,'id')}')">✅ Accept</button>
+              <button class="btn btn-danger btn-sm" onclick="window.openRejectModal('${g(r,'id')}')">❌ Reject</button>`;
+  }
   if(isTech()&&g(r,'assignedToUser')===curUser()&&st==='IN_PROGRESS')
     return `<button class="btn btn-primary btn-sm" onclick="window.openMaintStage4('${g(r,'id')}')">📝 File Report</button>`;
   if(!isTech()&&!isIncharge()&&g(r,'submittedByUser')===curUser()&&st==='ACCEPTED')
@@ -16097,9 +16106,15 @@ function _buildRows(reqs){
         ${(()=>{
           if(locked) return '';
           const _st=g(r,'status'), _mt=roleToTypeCode(curRole());
-          if(isTech()&&_mt&&g(r,'type')===_mt&&_st==='OPEN'&&canAcceptMaint())
-            return '<button class="btn btn-primary btn-sm" onclick="window.acceptMaintRequest(\'${id}\')">✅ Accept</button>'
-                  +'<button class="btn btn-danger btn-sm" onclick="window.openRejectModal(\'${id}\')">❌ Reject</button>';
+          if(canAcceptMaint()&&_st==='OPEN'){
+            const _tsc2=typeof techTypeScope==='function'?techTypeScope():null;
+            const _tali2={ME:['ME','MECHANICAL'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
+            const _rqt2=String(g(r,'type')||'').toUpperCase();
+            const _tmatch2=!_tsc2||(_tali2[_tsc2]||[_tsc2]).indexOf(_rqt2)>-1;
+            if(isAdmin()||_tmatch2)
+              return '<button class="btn btn-primary btn-sm" onclick="window.acceptMaintRequest(\'${id}\')">✅ Accept</button>'
+                    +'<button class="btn btn-danger btn-sm" onclick="window.openRejectModal(\'${id}\')">❌ Reject</button>';
+          }
           if(isTech()&&_mt&&g(r,'type')===_mt&&['ACCEPTED','IN_PROGRESS'].includes(_st))
             return '<button class="btn btn-primary btn-sm" onclick="window.openMaintStage4(\'${id}\')">📝 Report</button>';
           if(isIncharge()&&_st==='PENDING_REVIEW')
