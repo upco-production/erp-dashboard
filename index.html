@@ -2856,8 +2856,8 @@ function renderDeptDailyTab(tc, dept){
   });
   const sorted = Object.values(byDate).sort((a,b)=>a.rawDate<b.rawDate?-1:1);
 
-  function dispProd(pk){ return isBag?(pk/1e6).toFixed(3)+' M PCS':pk.toFixed(1)+' KG'; }
-  function dispMeter(m){ return (m/1e6).toFixed(3)+' Mn M'; }
+  function dispProd(pk){ return isBag?(pk/1e6).toFixed(2)+' M PCS':pk.toFixed(1)+' KG'; }
+  function dispMeter(m){ return (m/1e6).toFixed(2)+' Mn M'; }
 
   function jobDetailRows(rows){
     return rows.map(r=>`
@@ -2955,10 +2955,10 @@ function renderDeptEETab(tc, dept){
   const isBagMaking = dept==='Bag Making';
   // For Bag Making: production in M PCS; for others: tons
   const prodTrend=isBagMaking
-    ? months6.map(m=>+(APP.productionData.filter(x=>x.month===m&&x.dept===dept).reduce((a,r)=>a+(+(r.production||r.productionPcs||r.PRODUCTION_PCS||0)),0)/1e6).toFixed(3))
+    ? months6.map(m=>+(APP.productionData.filter(x=>x.month===m&&x.dept===dept).reduce((a,r)=>a+(+(r.production||r.productionPcs||r.PRODUCTION_PCS||0)),0)/1e6).toFixed(2))
     : months6.map(m=>+(APP.productionData.filter(x=>x.month===m&&x.dept===dept).reduce((a,r)=>a+(+(r.productionKg||r.production||0)/1000),0)).toFixed(2));
   const prodByMachine=isBagMaking
-    ? machines.map(m=>+(m.records.reduce((a,r)=>a+(+(r.production||r.productionPcs||r.PRODUCTION_PCS||0)),0)/1e6).toFixed(3))
+    ? machines.map(m=>+(m.records.reduce((a,r)=>a+(+(r.production||r.productionPcs||r.PRODUCTION_PCS||0)),0)/1e6).toFixed(2))
     : machines.map(m=>+(m.records.reduce((a,r)=>a+(+(r.productionKg||r.production||0)/1000),0)).toFixed(2));
   const prodLabel=isBagMaking?'M PCS':'Tons';
   tc.innerHTML=`
@@ -6804,7 +6804,7 @@ function eeRowHTML(m){
   const isAdmin = window.isMainAdmin();
   // Bag Making: show Production PCS (in Mn PCS) instead of Meter (which is always 0 for bags)
   const prodCell = m.isBag
-    ? `<td>${(m.totalPcs/1e6).toFixed(3)} Mn PCS<div style="font-size:9px;color:var(--text3)">Avg Speed: ${m.totalAvgSpeed.toFixed(1)}</div></td>`
+    ? `<td>${(m.totalPcs/1e6).toFixed(2)} Mn PCS<div style="font-size:9px;color:var(--text3)">Avg Speed: ${m.totalAvgSpeed.toFixed(1)}</div></td>`
     : `<td>${m.totalMeter.toFixed(0)} m</td>`;
   const speedCell = isAdmin
     ? `<td><input type="number" id="${machInputId('mf-speed',m.codeKey)}" data-machine-code="${m.codeKey}" value="${m.standardSpeed||0}" step="0.01" style="width:70px"></td>`
@@ -8084,12 +8084,23 @@ function normalizeProductionRow(row){
   const dt=+(String(row.TOTAL_TECHNICAL_DOWNTIME_MIN||row.Downtime||row.downtime||0).replace(/,/g,''));
   const planningDT=+(String(row.PLANNING_DOWNTIME_MIN||row.planningDT||0).replace(/,/g,''));
   const productionMeter=+(String(row.PRODUCTION_METER||row.PRODUCTION_METERS||row.productionMeter||0).replace(/,/g,''));
-  const productionMin=+(String(row.PRODUCTION_MIN||row.PRODUCTION_RUNNING_MIN||row.productionMin||0).replace(/,/g,''));
+  // PRODUCTION_MIN = PRODUCTION RUNNING MIN (from sheet) — used for EE calculation
+  // EE = (Production Meter / Running Min) / Average Speed * 100
+  const productionMin=+(String(row.PRODUCTION_MIN||row.PRODUCTION_MINS||row.PRODUCTION_RUNNING_MIN||row.productionMin||0).replace(/,/g,''));
   const totalJobTimeMin=+(String(row.TOTAL_JOB_TIME_MIN||row.totalJobTimeMin||0).replace(/,/g,''));
-  const standardSpeed=+(String(row.STANDARD_SPEED||row.standardSpeed||0).replace(/,/g,''));
-  const calcEE=(productionMeter>0&&productionMin>0&&standardSpeed>0)?((productionMeter/productionMin)/standardSpeed*100):+(row.EE_PCT||row.ee||0);
-  const availableMin=totalJobTimeMin-dt-planningDT;
-  const calcOEE=(productionMin>0&&availableMin>0)?(productionMin/availableMin*100):+(row.OEE_PCT||row.oee||0);
+  const avgSpeedMM=+(String(row.AVERAGE_SPEED_MM||row.AVERAGE_SPEED_M_M||row.averageSpeed||row.standardSpeed||0).replace(/,/g,''));
+  // EE = (Production Meter / Running Min) / Average Speed × 100
+  // EE from sheet (%EE → PCTEE after normalization) or calculate from meter/min/speed
+  const sheetEE  = +(row.EE_PCT||row.PCTEE||row.EE||row.ee||0);
+  const sheetOEE = +(row.OEE_PCT||row.PCTOEE||row.OEE||row.oee||0);
+  const calcEE = (productionMeter>0 && productionMin>0 && avgSpeedMM>0)
+    ? +((productionMeter/productionMin)/avgSpeedMM*100).toFixed(2)
+    : sheetEE;
+  const availableMin = totalJobTimeMin - dt - planningDT;
+  const calcOEE = (productionMin>0 && availableMin>0)
+    ? +((productionMin/availableMin)*100).toFixed(2)
+    : sheetOEE;
+  const standardSpeed = avgSpeedMM;
   const calcWastePct=prodKg?((dept==='Printing'?(wasteKg/prodKg/2):(wasteKg/prodKg))*100):0;
   const iso=row.PRODUCTION_DATE||row.Date||row.date||formatDate(new Date());
   const r2=v=>Math.round((+v||0)*100)/100;
@@ -8097,7 +8108,8 @@ function normalizeProductionRow(row){
     date: iso, machine: row.MACHINE_NO||row.Machine||row.machine||'', shift: row.SHIFT||row.Shift||row.shift||'',
     incharge: row.SHIFT_INCHARGE||row.Incharge||row.incharge||'', sapPO: row.SAP_PO||row['SAP PO']||row.sapPO||'',
     sapSFG: row.SAP_SFG_NO||row.sapSFG||'', job: row.JOB_NAME||row.Job||row.job||'', customer: row.Customer||row.customer||'',
-    production: dept==='Bag Making' ? +(row.PRODUCTION_PCS||row['PRODUCTION PCS']||row.PRODUCTION_IN_PCS||row.BAG_PCS||row.OUTPUT_PCS||row.BAGS_PRODUCED||row.TOTAL_PCS||prodKg||0) : prodKg,
+    production: dept==='Bag Making' ? +(row.PRODUCTION_PCS||row['PRODUCTION PCS']||row.PRODUCTION_IN_PCS||row.BAG_PCS||row.OUTPUT_PCS||row.BAGS_PRODUCED||row.TOTAL_PCS||0) : prodKg,
+    productionPcs: dept==='Bag Making' ? +(row.PRODUCTION_PCS||row.PRODUCTION_IN_PCS||0) : 0,
     productionKg: prodKg, productionMeter, productionMin, totalJobTimeMin,
     waste: wasteKg, wastePercent:r2(calcWastePct),
     downtime:dt, planningDT, ee:r2(calcEE), oee:r2(calcOEE), sapStatus: row.SAP_STATUS||row.Status||row.sapStatus||''};
@@ -8364,7 +8376,7 @@ function buildDeptRequirementKPIs(dept,data){
   const prodValue=isBag?(prod/1000000).toFixed(2)+' M':(prod/1000).toFixed(2)+' T';
   const prodLabel=isBag?'PRODUCTION M PCS':'PRODUCTION TONS';
   // Meters: always in Millions
-  const metersVal=(meters/1e6).toFixed(3)+' Mn M';
+  const metersVal=(meters/1e6).toFixed(2)+' Mn M';
   return `<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
     ${metricCard(prodLabel,prodValue,FILTER_STATE?.label||APP.currentMonth,'cyan')}
     ${metricCard('PRODUCTION METERS',metersVal,'Production meters (Million)','green')}
@@ -8409,10 +8421,10 @@ function renderMachineCards(dept,data){
     <div class="machines-grid">
       ${machines.map(m=>{
         const rep=machineReplacementMetric(dept,m.records,m.jobSetting);
-        const prodDisplay=isBag?m.productionTons.toFixed(3)+' M':m.productionTons.toFixed(2)+' T';
+        const prodDisplay=isBag?m.productionTons.toFixed(2)+' M':m.productionTons.toFixed(2)+' T';
         const prodLabel=isBag?'Production (M PCS)':'Production (Tons)';
         const meters=m.records.reduce((a,r)=>a+(+r.productionMeter||+r.PRODUCTION_METER||0),0);
-        const metersDisp=(meters/1e6).toFixed(3)+' Mn M';
+        const metersDisp=(meters/1e6).toFixed(2)+' Mn M';
         const wp=m.production>0?(m.waste/m.production*100):0;
         return `<div class="machine-card">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
@@ -8472,7 +8484,7 @@ renderDeptPage=function(container,dept){
   const oeeA=avg(data,'oee');
   const meters=data.reduce((a,r)=>a+(+r.productionMeter||+r.PRODUCTION_METER||0),0);
   const dispProd=isBag?(prod/1e6).toFixed(2)+' M PCS':(prod/1000).toFixed(2)+' T';
-  const dispM=(meters/1e6).toFixed(3)+' Mn M';
+  const dispM=(meters/1e6).toFixed(2)+' Mn M';
   const prev=APP.productionData.filter(x=>x.month===getPrevMonth(APP.currentMonth)&&x.dept===dept);
   const chg=sum(prev,'production')>0?((prod-sum(prev,'production'))/sum(prev,'production')*100):0;
   container.innerHTML=`
@@ -8506,7 +8518,7 @@ switchDeptTab=function(tab,el,dept){
     const eeA=avg(data,'ee'); const oeeA=avg(data,'oee');
     const meters=data.reduce((a,r)=>a+(+r.productionMeter||+r.PRODUCTION_METER||0),0);
     const dispProd=isBag?(prod/1e6).toFixed(2)+' M PCS':(prod/1000).toFixed(2)+' T';
-    const dispM=(meters/1e6).toFixed(3)+' Mn M';
+    const dispM=(meters/1e6).toFixed(2)+' Mn M';
     const prev=APP.productionData.filter(x=>x.month===getPrevMonth(APP.currentMonth)&&x.dept===dept);
     const chg=sum(prev,'production')>0?((prod-sum(prev,'production'))/sum(prev,'production')*100):0;
     tc.innerHTML=deptMachineTabHTML(dept,data,{prod,waste,wasteP,dt,eeA,oeeA,dispProd,dispM,chg,isBag,meters});
@@ -8558,7 +8570,7 @@ function deptMachineTabHTML(dept,data,s){
   const prodTgtLbl = s.isBag ? prodTarget.toFixed(2)+' M' : prodTarget.toFixed(0)+' T';
   const metersM    = s.meters/1e6;
   const metersUnit = 'Mn M';
-  const metersDisp = metersM.toFixed(3)+' '+metersUnit;
+  const metersDisp = metersM.toFixed(2)+' '+metersUnit;
 
   // -- helper: full kpi card with badge + progress bar ----------------------
   const kpi=(icon,label,value,target,pct,color2,sub,badgeTxt,up)=>`
@@ -10258,40 +10270,150 @@ normalizeUserRow = function(r){
   };
 };
 function upNormalizeProductionByTab(r, tabName){
-  const n=upObjectNormalizeKeys(r);
-  const dept=UP_TAB_DEPT[tabName] || n.DEPARTMENT || n.DEPT || 'Production';
-  const date=n.PRODUCTION_DATE||n.DATE||'';
-  const totalWaste = Number(n.TOTAL_WASTE_KG||n.TOTAL_WASTE||n.TOTAL_WASTAGE_KG||n.PROCESS_WASTE||n.PROCESS_WASTAGE_KG||0) +
-    Number(n.PLAIN_WASTE||0) + Number(n.APPROVAL_WASTE||0) + Number(n.SHADE_CARD_WASTE||0) + Number(n.TECHNICAL_WASTE||n.TECHNICAL_WASTE_KG||0) +
-    Number(n.TRIM_WASTE||n.TRIM_WASTE_KG||0) + Number(n.EXTRA_TRIM_WASTE||0) + Number(n.SORTING_WASTE_KG||0) + Number(n.PUNCH_WASTE_KG||0);
-  return normalizeProductionRow(Object.assign({}, r, {
-    id:n.ID||tabName+'-'+Math.random().toString(36).slice(2), month:n.MONTH||upDateToMonthKey(date),
-    PRODUCTION_DATE:date, Department:dept, MACHINE_NO:n.MACHINE_NO||n.MACHINE||'', SHIFT:n.SHIFT||'',
-    SHIFT_INCHARGE:n.SHIFT_INCHARGE||n.INCHARGE||'', SAP_STATUS:n.SAP_STATUS||n.STATUS||'', SAP_SFG_NO:n.SAP_SFG_NO||n.SFG_CODE||n.SFG||'',
-    SAP_PO:n.SAP_PO||n.PO||n.SAP_CODE||'', JOB_NAME:n.JOB_NAME||n.JOB||'', JOB_SETTING:n.JOB_SETTING||n.NO_OF_JOB_SETTING||0,
-    PRODUCTION_KG:n.PRODUCTION_KG||n.PRODUCED_QUANTITY||n.QTY_KG||n.QUANTITY||0,
-    PRODUCTION_PCS:(()=>{
-      const v=Number(n.PRODUCTION_PCS||n.PRODUCED_PCS||n.BAGS_PRODUCED||n.OUTPUT_PCS||n.QTY_PCS||n.BAG_PCS||n.TOTAL_PCS||n.PIECE_COUNT||n.PIECES||n.PRODUCTION_IN_PCS||n.NET_PRODUCTION_PCS||0);
-      if(v>0) return v;
-      // Scan all keys for PCS
-      for(const k of Object.keys(n)){ if(k.includes('PCS')&&!k.includes('WASTE')&&!k.includes('PCT')){ const nv=Number(n[k]||0); if(nv>0) return nv; } }
-      return 0;
-    })(),
-    PRODUCTION_METER:n.PRODUCTION_METER||n.PRODUCTION_METERS||n.METER||0,
-    TOTAL_WASTE_KG:n.TOTAL_WASTE_KG||n.TOTAL_WASTE||n.TOTAL_WASTAGE_KG||totalWaste||0,
-    TOTAL_WASTE_PCT:n.TOTAL_WASTE_PCT||n.TOTAL_WASTE_PERCENT||n.WASTAGE_PCT||0,
-    APPROVAL_WASTE:n.APPROVAL_WASTE||n.APPROVAL_WASTAGE_KG||0,
-    EXTRA_TRIM_WASTE:n.EXTRA_TRIM_WASTE||0,
-    TECHNICAL_WASTE:n.TECHNICAL_WASTE||n.TECHNICAL_WASTE_KG||0,
-    MECHANICAL_DOWNTIME_MIN:n.MECHANICAL_DOWNTIME_MIN||0,
-    ELECTRICAL_DOWNTIME_MIN:n.ELECTRICAL_DOWNTIME_MIN||0,
-    UTILITIES_DOWNTIME_MIN:n.UTILITIES_DOWNTIME_MIN||0,
-    PREVENTIVE_MAINTENANCE_MIN:n.PREVENTIVE_MAINTENANCE_MIN||0,
-    PLANNING_DOWNTIME_MIN:n.PLANNING_DOWNTIME_MIN||0,
-    UNPLANNED_DOWNTIME_MIN:n.UNPLANNED_DOWNTIME_MIN||0,
-    TOTAL_TECHNICAL_DOWNTIME_MIN:n.TOTAL_TECHNICAL_DOWNTIME_MIN||n.TECHNICAL_DOWNTIME||n.DOWNTIME||0,
-    EE_PCT:n.EE_PCT||n.EE||0, OEE_PCT:n.OEE_PCT||n.OEE||0, CREATED_BY:n.CREATED_BY||'', CREATED_AT:n.CREATED_AT||''
-  }));
+  const n = upObjectNormalizeKeys(r);
+  // upDeepCleanKey converts: % → PCT, spaces → _, removes dots
+  // So: %EE → PCTEE, %OEE → PCTOEE, %TOTAL WASTE → PCTTOTAL_WASTE
+  // MACHINE NO. → MACHINE_NO, AVERAGE SPEED M/M → AVERAGE_SPEED_M_M
+  const dept = UP_TAB_DEPT[tabName] || n.DEPARTMENT || n.DEPT || 'Production';
+  const date = n.PRODUCTION_DATE || n.DATE || '';
+  const N = k => Number(n[k])||0;
+  const S = k => String(n[k]||'').trim();
+
+  // Running minutes for EE calculation (column name varies by dept)
+  const productionMin = N('PRODUCTION_RUNNING_MIN') || N('PRODUCTION_MINS') || N('PRODUCTION_MIN');
+  // Average speed M/M
+  const avgSpeed = N('AVERAGE_SPEED_M_M') || N('AVERAGE_SPEED_MM');
+
+  const common = {
+    id                           : n.ID || tabName+'-'+Math.random().toString(36).slice(2),
+    month                        : n.MONTH || upDateToMonthKey(date),
+    PRODUCTION_DATE              : date,
+    Department                   : dept,
+    MACHINE_NO                   : S('MACHINE_NO'),
+    SHIFT                        : S('SHIFT'),
+    SHIFT_INCHARGE               : S('SHIFT_INCHARGE'),
+    SAP_STATUS                   : S('SAP_STATUS'),
+    SAP_SFG_NO                   : S('SAP_SFG_NO'),
+    SAP_PO                       : S('SAP_PO'),
+    JOB_NAME                     : S('JOB_NAME'),
+    TOTAL_JOB_TIME_MIN           : N('TOTAL_JOB_TIME_MIN'),
+    PRODUCTION_KG                : N('PRODUCTION_KG'),
+    PRODUCTION_METER             : N('PRODUCTION_METER'),
+    PRODUCTION_MIN               : productionMin,
+    AVERAGE_SPEED_MM             : avgSpeed,
+    RHI                          : N('RHI'),
+    EE_PCT                       : N('PCTEE')  || N('EE_PCT')  || N('EE'),
+    OEE_PCT                      : N('PCTOEE') || N('OEE_PCT') || N('OEE'),
+    MECHANICAL_DOWNTIME_MIN      : N('MECHANICAL_DOWNTIME_MIN'),
+    ELECTRICAL_DOWNTIME_MIN      : N('ELECTRICAL_DOWNTIME_MIN'),
+    UTILITIES_DOWNTIME_MIN       : N('UTILITIES_DOWNTIME_MIN'),
+    PREVENTIVE_MAINTENANCE_MIN   : N('PREVENTIVE_MAINTENANCE_MIN'),
+    TOTAL_TECHNICAL_DOWNTIME_MIN : N('TOTAL_TECHNICAL_DOWNTIME_MIN'),
+    PLANNING_DOWNTIME_MIN        : N('PLANNING_DOWNTIME_MIN'),
+    UNPLANNED_DOWNTIME_MIN       : N('UNPLANNED_DOWNTIME_MIN'),
+    REMARKS                      : S('REMARKS'),
+    CREATED_BY                   : S('CREATED_BY'),
+    CREATED_AT                   : S('CREATED_AT'),
+  };
+
+  let dept_fields = {};
+
+  if(tabName === 'PRINTING_IMPORT'){
+    const wasteKg  = N('TOTAL_WASTE_KG');
+    const wastePct = N('PCTTOTAL_WASTE') || N('TOTAL_WASTE_PCT');
+    dept_fields = {
+      JOB_SETTING               : N('JOB_SETTING'),
+      PROCESS_WASTE             : N('PROCESS_WASTE'),
+      PLAIN_WASTE               : N('PLAIN_WASTE'),
+      APPROVAL_WASTE            : N('APPROVAL_WASTE'),
+      SHADE_CARD_WASTE          : N('SHADE_CARD_WASTE'),
+      TECHNICAL_WASTE           : N('TECHNICAL_WASTE'),
+      TOTAL_WASTE_KG            : wasteKg || (N('PROCESS_WASTE')+N('PLAIN_WASTE')+N('APPROVAL_WASTE')+N('SHADE_CARD_WASTE')+N('TECHNICAL_WASTE')),
+      TOTAL_WASTE_PCT           : wastePct,
+      PROCESS_DOWNTIME_MIN      : N('PROCESS_DOWNTIME_MIN'),
+      APPROVAL_DOWNTIME_MIN     : N('APPROVAL_DOWNTIME_MIN'),
+      SAP_MATERIAL_CODE         : S('SAP_MATERIAL_CODE'),
+      SUBSTRATE                 : S('SUBSTRATE'),
+      MATERIAL_SIZE             : S('MATERIAL_SIZE'),
+      THICKNESS                 : S('THICKNESS'),
+      NET_RAW_MATERIAL_CONSUMED : N('NET_RAW_MATERIAL_CONSUMED'),
+      PRODUCTION_PCS            : 0,
+    };
+  }
+
+  else if(tabName === 'LAMINATION_IMPORT'){
+    // TOTAL WASTE → TOTAL_WASTE (KG value, no % prefix)
+    // %TOTAL WASTE → PCTTOTAL_WASTE (percentage)
+    const wasteKg  = N('TOTAL_WASTE_KG') || N('TOTAL_WASTE');
+    const wastePct = N('PCTTOTAL_WASTE') || N('TOTAL_WASTE_PCT');
+    dept_fields = {
+      JOB_SETTING               : N('JOB_SETTING'),
+      LAMINATION_TYPE           : S('LAMINATION'),
+      PROCESS_WASTE             : N('PROCESS_WASTE'),
+      PLAIN_WASTE               : N('PLAIN_WASTE'),
+      APPROVAL_WASTE            : N('APPROVAL_WASTE'),
+      TECHNICAL_WASTE           : N('TECHNICAL_WASTE'),
+      TOTAL_WASTE_KG            : wasteKg || (N('PROCESS_WASTE')+N('PLAIN_WASTE')+N('TECHNICAL_WASTE')),
+      TOTAL_WASTE_PCT           : wastePct,
+      PROCESS_DOWNTIME_MIN      : N('PROCESS_DOWNTIME_MIN'),
+      APPROVAL_DOWNTIME_MIN     : N('APPROVAL_DOWNTIME_MIN'),
+      SAP_MATERIAL_CODE         : S('SAP_MATERIAL_CODE'),
+      SUBSTRATE                 : S('SUBSTRATE'),
+      MATERIAL_SIZE             : S('MATERIAL_SIZE'),
+      THICKNESS                 : S('THICKNESS'),
+      NET_RAW_MATERIAL_CONSUMED : N('NET_RAW_MATERIAL_CONSUMED_KG') || N('NET_RAW_MATERIAL_CONSUMED'),
+      ADHESIVE_CONSUMED_KG      : N('ADHESIVE_CONSUMED_KG'),
+      NET_PRINTED_MATERIAL_KG   : N('NET_PRINTED_MATERIAL_COSUMED_KG'),
+      PRODUCTION_PCS            : 0,
+    };
+  }
+
+  else if(tabName === 'SLITTING_IMPORT'){
+    // TOTAL WASTE → TOTAL_WASTE (KG)
+    // %TOTAL WASTE → PCTTOTAL_WASTE (%)
+    const wasteKg  = N('TOTAL_WASTE_KG') || N('TOTAL_WASTE');
+    const wastePct = N('PCTTOTAL_WASTE') || N('TOTAL_WASTE_PCT');
+    dept_fields = {
+      JOB_SETTING               : N('NO_OF_JOB_SETTING') || N('JOB_SETTING'),
+      TRIM_WASTE                : N('TRIM_WASTE'),
+      EXTRA_TRIM_WASTE          : N('EXTRA_TRIM_WASTE'),
+      PROCESS_WASTE             : N('PROCESS_WASTE'),
+      PRINT_WASTE               : N('PRINT_WASTE'),
+      LAMINATION_WASTE          : N('LAMINATION_WASTE'),
+      TECHNICAL_WASTE           : N('TECHNICAL_WASTE'),
+      TOTAL_WASTE_KG            : wasteKg || (N('TRIM_WASTE')+N('EXTRA_TRIM_WASTE')+N('PROCESS_WASTE')+N('PRINT_WASTE')+N('LAMINATION_WASTE')+N('TECHNICAL_WASTE')),
+      TOTAL_WASTE_PCT           : wastePct,
+      PROCESS_DOWNTIME_MIN      : N('PROCESS_DOWNTIME_MIN'),
+      MOTHER_REEL_INPUT         : N('MOTHER_REEL_INPUT'),
+      PRODUCTION_PCS            : 0,
+    };
+  }
+
+  else if(tabName === 'BAG_MAKING_IMPORT'){
+    dept_fields = {
+      JOB_SETTING               : N('COUNT_OF_JOB') || N('NO_OF_JOB_SETTING') || N('JOB_SETTING'),
+      PRODUCTION_PCS            : N('PRODUCTION_PCS'),
+      JOB_SETTING_KG            : N('JOB_SETTING_KG'),
+      PROCESS_WASTAGE_KG        : N('PROCESS_WASTAGE_KG'),
+      SORTING_WASTE_KG          : N('SORTING_WASTE_KG'),
+      PUNCH_WASTE_KG            : N('PUNCH_WASTE_KG'),
+      TRIM_WASTE_KG             : N('TRIM_WASTE_KG'),
+      SLITTING_WASTE_KG         : N('SLITTING_WASTE_KG'),
+      PRINTING_WASTE_KG         : N('PRINTING_WASTE_KG'),
+      LAMINATE_WASTE_KG         : N('LAMINATE_WASTE_KG'),
+      TOTAL_WASTE_KG            : N('TOTAL_WASTE_KG') || (N('PROCESS_WASTAGE_KG')+N('SORTING_WASTE_KG')+N('PUNCH_WASTE_KG')+N('TRIM_WASTE_KG')+N('SLITTING_WASTE_KG')+N('PRINTING_WASTE_KG')+N('LAMINATE_WASTE_KG')+N('TECHNICAL_WASTE_KG')),
+      TOTAL_WASTE_PCT           : N('PCTTOTAL_WASTE') || N('TOTAL_WASTE_PCT'),
+      WASTAGE_IN_PCS            : N('WASTAGE_IN_PCS'),
+      TOTAL_PCS_WASTE_PCT       : N('PCTTOTAL_PCS_WASTE') || N('TOTAL_PCS_WASTE_PCT'),
+      TECHNICAL_WASTE_KG        : N('TECHNICAL_WASTE_KG'),
+      PROCESS_DOWNTIME_MIN      : N('PROCESS_DOWNTIME_MIN'),
+      INPUT_MATERIAL_KG         : N('INPUT_MATERIAL_KG'),
+      ZIPPER_WEIGHT             : N('ZIPPER_WEIGHT'),
+      SIDE_GUSSET_WEIGHT        : N('SIDE_GUSSET_WEIGHT'),
+    };
+  }
+
+  return normalizeProductionRow(Object.assign({}, r, common, dept_fields));
 }
 normalizeProdSheetRow = function(r){ return upNormalizeProductionByTab(r, r.__SOURCE_TAB || ''); };
 async function upReadTab(key, tabName){
@@ -10504,7 +10626,7 @@ async function upReadTabMultiPattern(key, tabName){
   const cfg=ERP_SHEET_CONFIG.SOURCES[key];
   // Determine headerRow: SYSTEM_MASTER tabs use row 3, production tabs use row 5
   const _hdr = (key==='SYSTEM_MASTER') ? 3 : 
-               (key==='FG' || key==='FG_MASTER') ? 4 : 5;
+               (key==='FG' || key==='FG_MASTER') ? 3 : 5;
   const attempts=[
     {action:'readsystem', tab:tabName, headerRow:_hdr, dept:(cfg.dept||'')},
     {action:'read', dept:(cfg.dept||key), tab:tabName, headerRow:_hdr},
@@ -10983,7 +11105,7 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
     appScriptUrl: 'https://up-erp-fcm.admin-upco.workers.dev',
     sheets: {
       SYSTEM_MASTER: { id:'1_wS3PPXn2YM8hlKQipPhrH1ere4s2wvda-1ETAG1fFM', tabs:{ PASSWORD_MASTER:3, USER_MASTER:3, MACHINE_MASTER:3, VENDOR_MASTER:3, SYNC_LOG:3, ERROR_LOG:3 } },
-      PRINTING:{ id:'1qB9ort3sX3P0fiqyaP2WxEF9KcYwlpIZGWOfn_fxKVs',dept:'PRINTING',tabs:{PRINTING_IMPORT:5} }, INK:{ id:'143EJbfmkpp9XNtfZDot5ydac_Xth8YTHR0iqNWTqSYw',dept:'INK',tabs:{INK_IMPORT:5} }, LAMINATION:{ id:'16jILdm69JA-bIJdMuxi4pR6o3qlBJ4z_qNFLrifhxFc',dept:'LAMINATION',tabs:{LAMINATION_IMPORT:5} }, SLITTING:{ id:'1Q53yyK6YFTRDq1Fazd6CYHS-4yTczX2OLJCL9cL9_c8',dept:'SLITTING',tabs:{SLITTING_IMPORT:5} }, BAG_MAKING:{ id:'1i26Svbmc-zD4Ul1CkY4RXOTT4ldbCnHGHWEjB7mMirA',dept:'BAG_MAKING',tabs:{BAG_MAKING_IMPORT:5} }, QUALITY:{ id:'1bGNAfSe6L1OlyWP9YfgGE1C3TLXKWTR9Y-BGOMEJyzU',dept:'QUALITY',tabs:{QUALITY_IMPORT:5} }, DISPATCH:{ id:'12aZX2Pz0J-sb1s8psnBOs30Dlud1WkYFDXlXtXU03eE',dept:'DISPATCH',tabs:{DISPATCH_IMPORT:5} }, FG:{ id:'1KNIVZ5vMtcHJ8UZijXwP8MZ0xi6z5ndR47oBo4viwhs',dept:'FG',tabs:{FG_MASTER:4} },
+      PRINTING:{ id:'1qB9ort3sX3P0fiqyaP2WxEF9KcYwlpIZGWOfn_fxKVs',dept:'PRINTING',tabs:{PRINTING_IMPORT:5} }, INK:{ id:'143EJbfmkpp9XNtfZDot5ydac_Xth8YTHR0iqNWTqSYw',dept:'INK',tabs:{INK_IMPORT:5} }, LAMINATION:{ id:'16jILdm69JA-bIJdMuxi4pR6o3qlBJ4z_qNFLrifhxFc',dept:'LAMINATION',tabs:{LAMINATION_IMPORT:5} }, SLITTING:{ id:'1Q53yyK6YFTRDq1Fazd6CYHS-4yTczX2OLJCL9cL9_c8',dept:'SLITTING',tabs:{SLITTING_IMPORT:5} }, BAG_MAKING:{ id:'1i26Svbmc-zD4Ul1CkY4RXOTT4ldbCnHGHWEjB7mMirA',dept:'BAG_MAKING',tabs:{BAG_MAKING_IMPORT:5} }, QUALITY:{ id:'1bGNAfSe6L1OlyWP9YfgGE1C3TLXKWTR9Y-BGOMEJyzU',dept:'QUALITY',tabs:{QUALITY_IMPORT:5} }, DISPATCH:{ id:'12aZX2Pz0J-sb1s8psnBOs30Dlud1WkYFDXlXtXU03eE',dept:'DISPATCH',tabs:{DISPATCH_IMPORT:5} }, FG:{ id:'1KNIVZ5vMtcHJ8UZijXwP8MZ0xi6z5ndR47oBo4viwhs',dept:'FG',tabs:{FG_MASTER:3} },
       MATERIAL_MASTER: { id:'19RA6iOet114fRAbczD6m_o37gVbztOH4QYutWAaYo7o', tabs:{ MATERIAL_MASTER:4 } },
       PLANNING_ORDER_MASTER: { id:'10e6QTcE50kXcA__RHgCzGzzt5Gpyvb5I9c2Iojm2Yvg', tabs:{ PLANNING_ORDER_MASTER:5 } },
       WIP_MATERIAL_MASTER: { id:'142hTGmzg9CyeL-aQTzaF6JIy7WCRNvXHe6p4LPk_a6k', tabs:{ WIP_ORDER_LINK:5, CURRENT_WIP_DASHBOARD:5, WIP_MOVEMENT_LOG:5, STAGE_BALANCE:5 } }
@@ -11057,7 +11179,7 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
   async function readTab(sourceKey, tab, headerRow){
     const source = V4.sheets[sourceKey];
     const _isSystem = source.id === '1_wS3PPXn2YM8hlKQipPhrH1ere4s2wvda-1ETAG1fFM';
-    const _hdr = headerRow || (_isSystem ? 3 : (sourceKey==='FG'?4:5));
+    const _hdr = headerRow || (_isSystem ? 3 : (sourceKey==='FG'?3:5));
     const _params = _isSystem ? {action:'readsystem',tab:tab,headerRow:_hdr} : {action:'read',dept:(source.dept||sourceKey),tab:tab,headerRow:_hdr};
     const _rtUrl=new URL('https://up-erp-fcm.admin-upco.workers.dev'); Object.entries(_params).forEach(([k,v])=>_rtUrl.searchParams.set(k,String(v))); _rtUrl.searchParams.set('_',Date.now());
     const res=await fetch(_rtUrl.toString(),{cache:'no-store',redirect:'follow'});
@@ -11951,7 +12073,7 @@ navigate = (function(orig){
     const prodValue=isBag?(prod/1000000).toFixed(2)+' M':(prod/1000).toFixed(2)+' T';
     const prodLabel=isBag?'PRODUCTION M PCS':'PRODUCTION TONS';
     // Meters in Millions
-    const metersVal=(meters/1e6).toFixed(3)+' Mn M';
+    const metersVal=(meters/1e6).toFixed(2)+' Mn M';
     const wasteCard = dept==='Printing'
       ? metricCard('% WASTE',pct2(wastePct),'Printing technical wastage: technical waste KG / production KG × 100',wastePct<=5?'green':'red')
       : metricCard('TOTAL WASTE KG',kg1(waste),'Actual waste in KG',waste<=0?'green':'red');
@@ -12179,7 +12301,7 @@ navigate = (function(orig){
     const prodLabel = isBag ? 'PRODUCTION M PCS' : 'PRODUCTION TONS';
     const prodValue = isBag ? (prod/1000000).toFixed(2)+' M' : (prodKg ? (prodKg/1000).toFixed(2) : r2(prod/1000).toFixed(2))+' T';
     // Meters in Millions
-    const metersVal = (meterTotal/1e6).toFixed(3)+' Mn M';
+    const metersVal = (meterTotal/1e6).toFixed(2)+' Mn M';
     return `<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
       ${metricCard(prodLabel,prodValue,FILTER_STATE?.label||APP.currentMonth,'cyan')}
       ${metricCard('PRODUCTION METERS',metersVal,'Production meters (Million)','green')}
@@ -14433,9 +14555,9 @@ console.log('[UP ERP V25] Detail report fix applied - renderDeptRows direct repl
       if(r._cat !== 'Unclassified') byDate[d][r._cat] += r._kg;
     });
     var labels = Object.keys(byDate).sort();
-    var up = labels.map(function(d){ return +tons(byDate[d].UP).toFixed(3); });
-    var uf = labels.map(function(d){ return +tons(byDate[d].UF).toFixed(3); });
-    var ex = labels.map(function(d){ return +tons(byDate[d].Export).toFixed(3); });
+    var up = labels.map(function(d){ return +tons(byDate[d].UP).toFixed(2); });
+    var uf = labels.map(function(d){ return +tons(byDate[d].UF).toFixed(2); });
+    var ex = labels.map(function(d){ return +tons(byDate[d].Export).toFixed(2); });
 
     var TICK = '#8b949e', GRID = 'rgba(139,148,158,.1)';
     try{
@@ -17039,10 +17161,11 @@ window.refreshMaintReport=function(){
   const typeF  = document.getElementById('mr-type-filter')?.value || '';
 
   // Filter requests within date range + dept + type
-  // Apply role-based dept scope + date + UI filters
   const reqs = (APP.maintenanceRequests||[]).filter(r=>canSeeMaintReq(r)).filter(r=>{
-    const d = String(g(r,'submittedAt')||'').slice(0,10) || _ymdFromDisplayDate(g(r,'requestDate'));
-    if(d < from || d > to) return false;
+    // requestDate field contains ISO: 2026-06-25T00:00:00 — slice to YYYY-MM-DD
+    const raw = String(g(r,'requestDate')||g(r,'submittedAt')||'');
+    const d   = raw.slice(0,10); // works for both ISO and YYYY-MM-DD
+    if(!d || d < from || d > to) return false;
     if(deptF && g(r,'dept')!==deptF) return false;
     if(typeF && g(r,'type')!==typeF) return false;
     return true;
@@ -17112,7 +17235,8 @@ window.refreshMaintReport=function(){
         </tr></thead>
         <tbody>${reqs.length?reqs.map(r=>`<tr>
           <td style="font-family:monospace;white-space:nowrap">${g(r,'notifNo')||g(r,'id')}</td>
-          <td>${g(r,'requestDate')||''}</td><td>${g(r,'requestTime')||'-'}</td>
+          <td style="white-space:nowrap">${(()=>{const _rd=g(r,'requestDate')||g(r,'submittedAt')||'';try{const _d=new Date(_rd);return isNaN(_d)?_rd:fmtDate(_d);}catch(e){return _rd||'-';}})()}</td>
+          <td style="white-space:nowrap">${g(r,'requestTime')||'-'}</td>
           <td>${g(r,'type')}</td><td>${g(r,'dept')}</td><td>${g(r,'machine')||'-'}</td>
           <td>${pBadge(g(r,'priority'))}</td><td>${sBadge(g(r,'status'))}</td>
           <td style="max-width:150px;font-size:10px;white-space:normal">${g(r,'description')||'-'}</td>
@@ -17159,10 +17283,10 @@ window.downloadMaintPDF=function(){
   const deptF  = document.getElementById('mr-dept-filter')?.value || '';
   const typeF  = document.getElementById('mr-type-filter')?.value || '';
   const ds     = (from===to) ? _displayDate(from) : (_displayDate(from)+' to '+_displayDate(to));
-  // Apply role-based dept scope + date + UI filters
   const reqs = (APP.maintenanceRequests||[]).filter(r=>canSeeMaintReq(r)).filter(r=>{
-    const d = String(g(r,'submittedAt')||'').slice(0,10) || _ymdFromDisplayDate(g(r,'requestDate'));
-    if(d < from || d > to) return false;
+    const raw = String(g(r,'requestDate')||g(r,'submittedAt')||'');
+    const d   = raw.slice(0,10);
+    if(!d || d < from || d > to) return false;
     if(deptF && g(r,'dept')!==deptF) return false;
     if(typeF && g(r,'type')!==typeF) return false;
     return true;
@@ -17768,47 +17892,48 @@ async function fetchFGFromSheet(){
 // COL N = PCS / Meters value (always extracted directly - no unit criteria)
 // Customer grouping comes from the sheet's customer/party column
 function normFG(r){
-  // Helper - reads by header name first, then falls back to column letter key
-  const byName = (...keys) => {
-    for(const k of keys){
-      const v = r[k];
-      if(v !== undefined && v !== null && String(v).trim() !== '') return v;
-    }
-    return undefined;
+  // Apps Script normalizes headers: spaces→_ uppercase
+  // Sheet headers: Material Code | Material Description | Plant | Storage Location |
+  //   Base Unit | Unrestricted Stock | Stock in Quality Inspection | Blocked Stock |
+  //   Material Group | TOTAL KG | FACTOR | CUSTOMER
+  const v = k => {
+    const val = r[k];
+    return (val !== undefined && val !== null && String(val).trim() !== '') ? val : undefined;
   };
-  // Read by spreadsheet column letter (Apps Script often returns keys as
-  // the actual header text; if your sheet has no header row or the header
-  // differs, we also try the positional keys A/B/C… as a fallback)
-  const colA = byName('MATERIAL_CODE','MATERIAL CODE','Material Code','A') ?? '';
-  const colB = byName('MATERIAL_DESCRIPTION','MATERIAL DESCRIPTION','Material Description','B') ?? '';
-  const colC = byName('PLANT','C') ?? '';
-  const colD = byName('STORAGE_LOCATION','STORAGE LOCATION','Storage Location','SLOC','D') ?? '';
-  const colE = byName('BASE_UNIT','BASE UNIT','Base Unit','UOM','UNIT','E') ?? '';
-  const colI = byName('MATERIAL_GROUP','MATERIAL GROUP','Material Group','I') ?? '';
-  const colJ = parseFloat(byName('TOTAL_KG','TOTAL KG','Total KG','J') ?? byName('QTY','QUANTITY','STOCK_QTY') ?? 0) || 0;
-  // COL N = PCS / Meters - extracted directly, no Col E criteria applied
-  const colNRaw = byName('PCS_METERS','PCS__METERS','PCS/METERS','PCS / METERS','PCS METERS','PCS_MTR','N');
-  const colN = parseFloat(colNRaw ?? 0) || 0;
-  // Customer - blank rows grouped under "No Customer Mentioned" so no data is lost
-  const customerRaw = byName('CUSTOMER','CUSTOMER_NAME','PARTY','PARTY_NAME') ?? '';
-  const customer = String(customerRaw).trim() || 'No Customer Mentioned';
+  const N = k => parseFloat(v(k) ?? 0) || 0;
 
-  // PCS / Meters: always read from COL N directly - show value if non-zero, else null (dash)
-  const pcsMtrValue = colN > 0 ? colN : null;
+  const materialCode = String(v('MATERIAL_CODE') ?? v('A') ?? '').trim();
+  const materialDesc = String(v('MATERIAL_DESCRIPTION') ?? v('B') ?? '').trim();
+  const plant        = String(v('PLANT') ?? v('C') ?? '').trim();
+  const storageLoc   = String(v('STORAGE_LOCATION') ?? v('D') ?? '').trim();
+  const baseUnit     = String(v('BASE_UNIT') ?? v('E') ?? '').trim();
+  const unrestStock  = N('UNRESTRICTED_STOCK') || N('F');
+  const qualStock    = N('STOCK_IN_QUALITY_INSPECTION') || N('G');
+  const blockedStock = N('BLOCKED_STOCK') || N('H');
+  const matGroup     = String(v('MATERIAL_GROUP') ?? v('I') ?? '').trim();
+  const totalKg      = N('TOTAL_KG') || N('J');
+  const factor       = N('FACTOR') || N('K');
+  const customer     = String(v('CUSTOMER') ?? v('L') ?? '').trim() || 'No Customer Mentioned';
+
+  // No separate PCS/METER column in this sheet — use unrestricted stock
+  const pcsMtrValue  = null;
 
   return {
     customer,
-    materialCode:  colA,
-    materialDesc:  colB,
-    plant:         colC,
+    materialCode,
+    materialDesc,
+    plant,
     storageLoc:    colD,
-    baseUnit:      colE,
-    colN,
-    pcsMtrValue,   // null = hide (dash), number = show
-    materialGroup: colI,
-    totalKg:       colJ,
-    // legacy aliases kept so customer card qty bar still works
-    qty:           colJ,
+    baseUnit:      baseUnit,
+    storageLoc:    storageLoc,
+    unrestStock:   unrestStock,
+    qualStock:     qualStock,
+    blockedStock:  blockedStock,
+    factor:        factor,
+    pcsMtrValue,
+    materialGroup: matGroup,
+    totalKg:       totalKg,
+    qty:           totalKg,
     unit:          'KG',
     _raw: r
   };
