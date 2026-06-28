@@ -10893,13 +10893,10 @@ const DEPT_OPTIONS = [
   { key:'DISPATCH',  label:'🚚 Dispatch' },
 ];
 
-// Get open months from PPE - returns array like ['Jun-26','Jul-26','Aug-26']
+// Lock status is NOT used for data fetching — all months always fetched
+// Locking only controls UI editing permissions
 function sseGetOpenMonths(){
-  if(typeof window.ppGetOpenMonths === 'function'){
-    const months = window.ppGetOpenMonths();
-    if(months && months.length) return months;
-  }
-  return [APP.currentMonth || 'Jun-26'];
+  return [APP.currentMonth || 'Jun-26']; // fromDate handles range, not openMonths
 }
 
 // PERMANENT FIX: fromDate always = 6 months back from TODAY
@@ -10964,27 +10961,27 @@ function sseApplyRows(rows){
 
   if(prod.length){
     const norm = prod.map(r=>{ try{ return upNormalizeProductionByTab(r,r.__DEPT+'_IMPORT'); }catch(e){ return r; } });
-    // Keep: locked month rows (all depts) + open month rows for NON-fetched depts
-    const keep = (APP.productionData||[]).filter(r=>{
-      const m = r.month||upDateToMonthKey(r.PRODUCTION_DATE||r.DATE||'')||'';
-      const d = String(r.dept||r.Department||r.__DEPT||r.DEPARTMENT||'').toUpperCase();
-      const locked = typeof window.isMonthLocked==='function' && window.isMonthLocked(m);
-      // Keep if: locked month OR dept not in this fetch
-      return locked || !fetchedProdDepts.has(d);
-    });
+    // If ALL 4 depts fetched → replace entirely (no keep needed, avoids duplicates)
+    const ALL_PROD_DEPTS = new Set(['PRINTING','LAMINATION','SLITTING','BAG_MAKING']);
+    const fetchedAll = ['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].every(d=>fetchedProdDepts.has(d));
+    let keep = [];
+    if(!fetchedAll){
+      // Partial fetch — keep only non-fetched depts (no lock check needed)
+      keep = (APP.productionData||[]).filter(r=>{
+        const d = String(r.dept||r.Department||r.__DEPT||r.DEPARTMENT||'').toUpperCase();
+        return !fetchedProdDepts.has(d);
+      });
+    }
     APP.productionData = dedupProductionData(keep.concat(norm));
   }
   if(ink.length){
-    const frozenInk = (APP.inkData||[]).filter(r=>typeof window.isMonthLocked==='function'&&window.isMonthLocked(r.month||''));
-    APP.inkData = frozenInk.concat(ink.map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.PRODUCTION_DATE||r.DATE||'')||APP.currentMonth})));
+    APP.inkData = ink.map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.PRODUCTION_DATE||r.DATE||'')}));
   }
   if(ncr.length){
-    const frozenNcr = (APP.ncrData||[]).filter(r=>typeof window.isMonthLocked==='function'&&window.isMonthLocked(r.month||''));
-    APP.ncrData = frozenNcr.concat(ncr.map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||r.DATE||'')||APP.currentMonth})));
+    APP.ncrData = ncr.map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||r.DATE||'')}));
   }
   if(disp.length){
-    const frozenDisp = (APP.dispatchData||[]).filter(r=>typeof window.isMonthLocked==='function'&&window.isMonthLocked(r.month||r.MONTH||''));
-    APP.dispatchData = frozenDisp.concat(disp);
+    APP.dispatchData = disp;
     if(window.upDispatch && typeof window.upDispatch.setData==='function') window.upDispatch.setData(APP.dispatchData);
   }
   if(fg.length) APP.fgData = fg;
@@ -19508,97 +19505,41 @@ function sdcSave(allRows){
   if(!Array.isArray(allRows) || !allRows.length) return;
   var currentMonth = todayMonthKey();
 
-  // Split rows by month
-  var byMonth = {};
-  allRows.forEach(function(r){
-    var m = r.month || '';
-    if(!m) return;
-    if(!byMonth[m]) byMonth[m] = [];
-    byMonth[m].push(r);
-  });
-
-  // LIVE: current month rows only
-  var liveRows = byMonth[currentMonth] || [];
+  // Save ALL rows in single key — no frozen/live split
+  // Lock status does NOT affect what is saved
   lsSet(SDC_LIVE_KEY, {
     month:   currentMonth,
-    rows:    liveRows,
+    rows:    allRows,
     savedAt: new Date().toISOString(),
-    count:   liveRows.length
+    count:   allRows.length
   });
-
-  // FROZEN: all past months (merge with existing frozen data)
-  var frozen = lsGet(SDC_FROZEN_KEY) || { months: {}, meta: {} };
-  if(!frozen.months) frozen.months = {};
-
-  var newMonthsAdded = 0;
-  Object.keys(byMonth).forEach(function(m){
-    if(m === currentMonth) return;  // skip live month
-    // Only overwrite if new data has MORE rows (never lose data)
-    var existing = frozen.months[m] || [];
-    if(byMonth[m].length >= existing.length){
-      frozen.months[m] = byMonth[m];
-      newMonthsAdded++;
-    }
-  });
-
-  frozen.meta = {
-    lastFull:     new Date().toISOString(),
-    liveMonth:    currentMonth,
-    frozenMonths: Object.keys(frozen.months).length,
-    totalFrozen:  Object.keys(frozen.months).reduce(function(a,m){ return a+frozen.months[m].length; }, 0)
-  };
-
-  lsSet(SDC_FROZEN_KEY, frozen);
-
-  // Update meta
   lsSet(SDC_META_KEY, {
-    lastSave:     new Date().toISOString(),
-    liveMonth:    currentMonth,
-    liveCount:    liveRows.length,
-    frozenMonths: Object.keys(frozen.months),
-    totalRows:    allRows.length
+    lastSave:  new Date().toISOString(),
+    liveMonth: currentMonth,
+    totalRows: allRows.length
   });
-
-  console.log('[SDC] Saved - Live: ' + liveRows.length + ' rows (' + currentMonth + ')'
-    + ' | Frozen: ' + frozen.meta.totalFrozen + ' rows across ' + frozen.meta.frozenMonths + ' months');
+  console.log('[SDC] Saved - ' + allRows.length + ' rows (all months, no lock filter)');
 }
 
 // -- Load: merge frozen + live → full dataset ------------------------------
-// Returns ALL rows (locked frozen + open live) for full APP.productionData
-// Smart merge in syncLiveV4 then splits: open→fresh, locked→this cache
+// Load all rows from single cache — no frozen/live split, no lock filter
 function sdcLoad(){
-  var frozen  = lsGet(SDC_FROZEN_KEY);
-  var live    = lsGet(SDC_LIVE_KEY);
-  var current = todayMonthKey();
-  var all     = [];
-
-  // Add all frozen months (these include both locked and previously-open months)
-  if(frozen && frozen.months){
-    Object.keys(frozen.months).forEach(function(m){
-      var rows = frozen.months[m] || [];
-      all = all.concat(rows);
-    });
+  var live = lsGet(SDC_LIVE_KEY);
+  if(live && Array.isArray(live.rows) && live.rows.length){
+    console.log('[SDC] Loaded ' + live.rows.length + ' rows (all months)');
+    return live.rows;
   }
-
-  // Add live (current month) rows
-  if(live && live.rows && Array.isArray(live.rows)){
-    if(live.month === current){
-      all = all.concat(live.rows);
-    } else if(live.month && live.rows.length > 0){
-      // Month rolled over → move to frozen
-      if(frozen && frozen.months && !frozen.months[live.month]){
-        frozen.months[live.month] = live.rows;
-        lsSet(SDC_FROZEN_KEY, frozen);
-        console.log('[SDC] Month rollover: ' + live.month + ' → frozen');
-      }
+  // Legacy: try frozen key for migration
+  var frozen = lsGet(SDC_FROZEN_KEY);
+  if(frozen && frozen.months){
+    var all = [];
+    Object.keys(frozen.months).forEach(function(m){ all = all.concat(frozen.months[m]||[]); });
+    if(all.length){
+      console.log('[SDC] Loaded ' + all.length + ' rows (legacy frozen)');
+      return all;
     }
   }
-
-  console.log('[SDC] Loaded ' + all.length + ' rows | '
-    + 'Frozen months: ' + (frozen && frozen.months ? Object.keys(frozen.months).length : 0)
-    + ' | Live: ' + current);
-
-  return all;
+  return [];
 }
 
 // -- Check if we have useful cached data ----------------------------------
