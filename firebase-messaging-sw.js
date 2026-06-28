@@ -28,7 +28,7 @@ firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
 // ── ERP URL (update if your domain changes) ───────────────────
-const ERP_URL = 'https://upco-dashboard.netlify.app';
+const ERP_URL = 'https://upco-production.github.io';
 
 // ── Months for date formatting ────────────────────────────────
 const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
