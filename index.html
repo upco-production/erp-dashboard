@@ -21216,28 +21216,21 @@ window.handleNotifBtnClick = async function(){
   // YELLOW — not yet asked, request permission + register token
   if(typeof toast==='function') toast('Enabling notifications…','info');
 
-  // Try multiple fallbacks for token registration
-  var _registerFn = (window.upFCM && window.upFCM.register)
-                  || window._fcmRegisterNow
-                  || null;
-
-  if(_registerFn){
-    await _registerFn();
-    window.updateNotifBtn();
-  } else {
-    // FCM not loaded yet — retry after 1.5s
-    console.warn('[FCM] Not ready, retrying…');
-    setTimeout(async function(){
-      var _fn = (window.upFCM && window.upFCM.register) || window._fcmRegisterNow;
-      if(_fn){
-        await _fn();
-        if(typeof window.updateNotifBtn==='function') window.updateNotifBtn();
-      } else {
-        if(typeof toast==='function')
-          toast('Please refresh page and try again.','error');
-      }
-    }, 1500);
+  // Register token — upFCM.register is always available
+  try{
+    if(window.upFCM && typeof window.upFCM.register === 'function'){
+      await window.upFCM.register();
+    } else {
+      if(typeof toast==='function')
+        toast('Please refresh the page and try again.','error');
+      return;
+    }
+  } catch(e){
+    console.warn('[FCM] Register error:', e.message);
+    if(typeof toast==='function')
+      toast('Notification error: ' + e.message,'error');
   }
+  window.updateNotifBtn();
 };
 
 window.toggleNotifSilent = function(){
@@ -22030,8 +22023,10 @@ setTimeout(function(){
     getToken: function(){ return _fcmToken || localStorage.getItem('up_fcm_token'); }
   };
 
-  // Also expose directly so handleNotifBtnClick can call it before upFCM is set
+  // Expose directly for bell button
   window._fcmRegisterNow = requestAndRegisterToken;
+  // Also patch upFCM immediately
+  if(window.upFCM) window.upFCM.register = requestAndRegisterToken;
 
   // Update bell button now that FCM is loaded
   setTimeout(function(){
