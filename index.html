@@ -1524,7 +1524,7 @@ function renderDashboard(container) {
   function resolveDispatchCategory(r){
     // Uses same logic as the upDispatch module's COLUMNS definition
     const plant = String(
-      r['PLANT/TYPE'] || r['PLANT_TYPE'] || r['PLANT'] || r['TYPE'] || ''
+      r['PLANT/TYPE'] || r['PLANT_TYPE'] || r['PLANTTYPE'] || r['PLANT'] || r['TYPE'] || ''
     ).trim().toUpperCase();
     if(/EXPORT/.test(plant)) return 'Export';
     if(/UF/.test(plant))     return 'UF';
@@ -1534,7 +1534,7 @@ function renderDashboard(container) {
     // Try every known synonym for the dispatched quantity column
     const qty = getAny(r,[
       'DISPATCHED (KG)','DISPATCHED_KG','DISPATCHED KG','DISPATCH KG',
-      'DISPATCHED','QTY KG','QUANTITY KG','KG','QTY','QUANTITY'
+      'DISPATCHEDKG','DISPATCHED','QTY KG','QUANTITY KG','KG','QTY','QUANTITY'
     ], '');
     return qty !== '' ? n(qty) : 0;
   }
@@ -10596,23 +10596,216 @@ function stopAutoSync(){
   if(APP.autoSyncTimer){ clearInterval(APP.autoSyncTimer); APP.autoSyncTimer=null; }
   if(APP.pageReloadTimer){ clearInterval(APP.pageReloadTimer); APP.pageReloadTimer=null; }
 }
-async function syncNowClick(){
+// ═══════════════════════════════════════════════════════════════════
+// SMART SYNC ENGINE (SSE v1.0)
+// - First run: sync all sheets
+// - Subsequent: popup with All + per-dept options
+// - Locked months: frozen in localStorage, never re-fetched
+// - Open months only: Apps Script filters by PRODUCTION_DATE
+// - Server cache TTL 30 min: one user syncs, all users benefit
+// ═══════════════════════════════════════════════════════════════════
+const SSE_KEY        = 'up_sse_v1';          // first-run flag
+const SSE_FROZEN_KEY = 'up_sse_frozen_v1';   // frozen (locked) months data
+const SSE_LIVE_KEY   = 'up_sse_live_v1';     // open months data
+const PROXY_URL      = 'https://up-erp-fcm.admin-upco.workers.dev';
+
+const DEPT_OPTIONS = [
+  { key:'ALL',       label:'🔄 All Departments' },
+  { key:'PRINTING',  label:'🖨️ Printing' },
+  { key:'LAMINATION',label:'🏭 Lamination' },
+  { key:'SLITTING',  label:'✂️ Slitting' },
+  { key:'BAG_MAKING',label:'👜 Bag Making' },
+  { key:'INK',       label:'🎨 Ink & Solvent' },
+  { key:'QUALITY',   label:'✅ Quality' },
+  { key:'DISPATCH',  label:'🚚 Dispatch' },
+];
+
+// Get open months from PPE — returns array like ['Jun-26','Jul-26','Aug-26']
+function sseGetOpenMonths(){
+  if(typeof window.ppGetOpenMonths === 'function'){
+    const months = window.ppGetOpenMonths();
+    if(months && months.length) return months;
+  }
+  // Fallback: use current month
+  return [APP.currentMonth || 'Jun-26'];
+}
+
+// Convert month key 'Jun-26' → fromDate '2026-06-01'
+function sseMonthToFromDate(months){
+  const MMAP = {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+  let earliest = null;
+  months.forEach(function(mk){
+    const parts = mk.split('-');
+    if(parts.length < 2) return;
+    const mNum = MMAP[parts[0]];
+    const yr   = 2000 + parseInt(parts[1], 10);
+    if(!mNum || isNaN(yr)) return;
+    const d = new Date(yr, mNum - 1, 1);
+    if(!earliest || d < earliest) earliest = d;
+  });
+  if(!earliest) return '';
+  return earliest.getFullYear() + '-' +
+         String(earliest.getMonth()+1).padStart(2,'0') + '-01';
+}
+
+// Load frozen data from localStorage
+function sseLoadFrozen(){
+  try{
+    const raw = localStorage.getItem(SSE_FROZEN_KEY);
+    return raw ? JSON.parse(raw) : [];
+  }catch(e){ return []; }
+}
+
+// Save frozen data — locked months, never changes
+function sseSaveFrozen(rows){
+  try{ localStorage.setItem(SSE_FROZEN_KEY, JSON.stringify(rows)); }catch(e){}
+}
+
+// Is this the first ever sync?
+function sseIsFirstRun(){
+  return !localStorage.getItem(SSE_KEY);
+}
+function sseMarkFirstRunDone(){
+  localStorage.setItem(SSE_KEY, '1');
+}
+
+// Core fetch: INCHARGE sheets, open months only
+async function sseFetchDept(dept, fromDate){
+  const u = new URL(PROXY_URL);
+  u.searchParams.set('action', 'read');
+  u.searchParams.set('dept', dept === 'ALL' ? 'ALL' : dept);
+  if(fromDate) u.searchParams.set('fromDate', fromDate);
+  u.searchParams.set('_', Date.now());
+  const res  = await fetch(u.toString(), {cache:'no-store', redirect:'follow'});
+  const text = await res.text();
+  let json;
+  try{ json = JSON.parse(text); }
+  catch(e){ throw new Error('Non-JSON: ' + text.slice(0,80)); }
+  if(json && json.ok === false) throw new Error(json.error || 'Apps Script error');
+  return json.rows || [];
+}
+
+// Apply fetched rows into APP data arrays
+function sseApplyRows(rows){
+  if(!rows || !rows.length) return;
+  const prod  = rows.filter(r=>['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].includes(String(r.__DEPT||'').toUpperCase()));
+  const ink   = rows.filter(r=>String(r.__DEPT||'')==='INK');
+  const ncr   = rows.filter(r=>String(r.__DEPT||'')==='QUALITY');
+  const disp  = rows.filter(r=>String(r.__DEPT||'')==='DISPATCH');
+  const fg    = rows.filter(r=>String(r.__DEPT||'')==='FG');
+
+  if(prod.length){
+    const norm = prod.map(r=>{ try{ return upNormalizeProductionByTab(r,r.__DEPT+'_IMPORT'); }catch(e){ return r; } });
+    // Merge: replace open-month rows, keep frozen rows
+    const frozenProd = (APP.productionData||[]).filter(r=>{
+      const m = r.month||upDateToMonthKey(r.PRODUCTION_DATE||r.DATE||'')||'';
+      return typeof window.isMonthLocked==='function' && window.isMonthLocked(m);
+    });
+    APP.productionData = frozenProd.concat(norm);
+  }
+  if(ink.length){
+    const frozenInk = (APP.inkData||[]).filter(r=>typeof window.isMonthLocked==='function'&&window.isMonthLocked(r.month||''));
+    APP.inkData = frozenInk.concat(ink.map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.PRODUCTION_DATE||r.DATE||'')||APP.currentMonth})));
+  }
+  if(ncr.length){
+    const frozenNcr = (APP.ncrData||[]).filter(r=>typeof window.isMonthLocked==='function'&&window.isMonthLocked(r.month||''));
+    APP.ncrData = frozenNcr.concat(ncr.map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||r.DATE||'')||APP.currentMonth})));
+  }
+  if(disp.length){
+    const frozenDisp = (APP.dispatchData||[]).filter(r=>typeof window.isMonthLocked==='function'&&window.isMonthLocked(r.month||r.MONTH||''));
+    APP.dispatchData = frozenDisp.concat(disp);
+    if(window.upDispatch && typeof window.upDispatch.setData==='function') window.upDispatch.setData(APP.dispatchData);
+  }
+  if(fg.length) APP.fgData = fg;
+}
+
+// Show sync popup
+function showSyncPopup(){
+  const openMonths = sseGetOpenMonths();
+  const fromDate   = sseMonthToFromDate(openMonths);
+
+  document.getElementById('modal-title').textContent = '🔄 Select Sync Scope';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="padding:8px 0">
+      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">
+        Open months: <b>${openMonths.join(', ')}</b> &nbsp;|&nbsp; From: <b>${fromDate}</b><br>
+        Locked months are cached locally — only open months will be fetched.
+      </div>
+      <div style="display:grid;gap:8px">
+        ${DEPT_OPTIONS.map(d=>`
+          <button class="btn btn-outline" style="text-align:left;padding:10px 14px;font-size:13px"
+            onclick="sseRunSync('${d.key}','${fromDate}')">
+            ${d.label}
+          </button>`).join('')}
+      </div>
+    </div>`;
+  document.getElementById('modal-footer').innerHTML =
+    '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>';
+  document.getElementById('modal-overlay').style.display = 'flex';
+}
+
+// Run sync for selected dept
+window.sseRunSync = async function(dept, fromDate){
+  closeModal();
   const btn = document.getElementById('sync-now-btn');
   if(btn){ btn.disabled=true; btn.textContent='⏳ Syncing...'; }
   try{
-    await syncAllSheets({silent:false, keepPage:APP.currentPage||'dashboard'});
-    // After real data fetch, refresh visible page
-    if(typeof refreshCurrentPageAfterSync==='function'){
-      refreshCurrentPageAfterSync(APP.currentPage||'dashboard');
-    } else if(typeof navigate==='function'){
-      navigate(APP.currentPage||'dashboard');
+    debugLog('info','SSE sync started', dept + (fromDate?' from '+fromDate:''));
+
+    if(dept === 'ALL'){
+      // Sync system master first
+      await syncOneSource('SYSTEM_MASTER');
+      await syncOneSource('MASTER_DATA');
+      await syncOneSource('PLANNING');
+      await syncOneSource('WIP');
+      // Then all INCHARGE (open months only)
+      const rows = await sseFetchDept('ALL', fromDate);
+      sseApplyRows(rows);
+      debugLog('ok','SSE ALL sync done', rows.length+' rows (open months)');
+    } else {
+      // Single dept
+      const rows = await sseFetchDept(dept, fromDate);
+      sseApplyRows(rows);
+      debugLog('ok','SSE '+dept+' sync done', rows.length+' rows');
     }
+
+    APP.lastAutoSyncAt = new Date().toLocaleString();
+    setConnVisual && setConnVisual('ok','Live Sync');
+    toast('Synced: ' + dept,'success');
+    refreshCurrentPageAfterSync(APP.currentPage||'dashboard');
     if(btn){ btn.textContent='✅ Synced!'; }
   }catch(e){
-    console.error(e);
+    debugLog('err','SSE sync failed',e.message);
+    toast('Sync failed: '+e.message,'error');
     if(btn){ btn.textContent='❌ Failed'; }
+  }finally{
+    APP.syncInProgress = false;
+    setTimeout(()=>{ if(btn){ btn.disabled=false; btn.textContent='🔄 Sync Now'; } }, 2500);
   }
-  setTimeout(()=>{ if(btn){ btn.disabled=false; btn.textContent='🔄 Sync Now'; } }, 2500);
+};
+
+async function syncNowClick(){
+  const btn = document.getElementById('sync-now-btn');
+
+  // FIRST RUN: sync everything silently, then mark done
+  if(sseIsFirstRun()){
+    if(btn){ btn.disabled=true; btn.textContent='⏳ First Sync...'; }
+    try{
+      await syncAllSheets({silent:false, keepPage:APP.currentPage||'dashboard'});
+      sseMarkFirstRunDone();
+      debugLog('ok','SSE first run complete','All sheets synced');
+      if(btn){ btn.textContent='✅ Synced!'; }
+    }catch(e){
+      debugLog('err','SSE first run failed',e.message);
+      if(btn){ btn.textContent='❌ Failed'; }
+    }finally{
+      setTimeout(()=>{ if(btn){ btn.disabled=false; btn.textContent='🔄 Sync Now'; } }, 2500);
+    }
+    return;
+  }
+
+  // SUBSEQUENT RUNS: show popup
+  showSyncPopup();
 }
 
 const __UP_PREVIOUS_DO_LOGIN = doLogin;
@@ -13643,18 +13836,18 @@ console.log('[UP ERP V25] Detail report fix applied — renderDeptRows direct re
     { key:'sno',      label:'S.No',          syn:['S.No','S NO','SR NO','SERIAL','SR'] },
     { key:'date',     label:'DATE',          syn:['DATE','DISPATCH DATE'] },
     { key:'customer', label:'CUSTOMER',      syn:['CUSTOMER','CUSTOMER NAME','PARTY','PARTY NAME'] },
-    { key:'po',       label:'P.O No.',       syn:['P.O No.','PO NO','PO NUMBER','P O NO','PURCHASE ORDER'] },
-    { key:'jobno',    label:'JOB No.',       syn:['JOB No.','JOB NO','JOB NUMBER'] },
-    { key:'dcmtn',    label:'DC/MTN NO.',    syn:['DC/MTN NO.','DC MTN NO','DC NO','MTN NO','DELIVERY CHALLAN'] },
-    { key:'gpno',     label:'GP No.',        syn:['GP No.','GP NO','GP NUMBER','GATE PASS'] },
+    { key:'po',       label:'P.O No.',       syn:['P.O No.','PO NO','PO_NO','PO NUMBER','P O NO','PURCHASE ORDER'] },
+    { key:'jobno',    label:'JOB No.',       syn:['JOB No.','JOB NO','JOB_NO','JOB NUMBER'] },
+    { key:'dcmtn',    label:'DC/MTN NO.',    syn:['DC/MTN NO.','DC MTN NO','DCMTN_NO','DC NO','MTN NO','DELIVERY CHALLAN'] },
+    { key:'gpno',     label:'GP No.',        syn:['GP No.','GP NO','GP_NO','GP NUMBER','GATE PASS'] },
     { key:'location', label:'LOCATION',      syn:['LOCATION','DESTINATION'] },
     { key:'ercodes',  label:'ER CODES',      syn:['ER CODES','ER CODE','ERCODE'] },
     { key:'jobname',  label:'JOB NAME',      syn:['JOB NAME','JOB DESC','JOB DESCRIPTION'] },
     { key:'kg',       label:'DISPATCHED (KG)', syn:['DISPATCHED (KG)','DISPATCHED KG','DISPATCH KG','DISPATCHED','QTY KG','QUANTITY KG','KG'] },
-    { key:'rolls',    label:'ROLLS/BAGS',    syn:['ROLLS/BAGS','ROLLS BAGS','ROLLS','BAGS','NO OF ROLLS'] },
-    { key:'pcsmtr',   label:'PCS/MTR',       syn:['PCS/MTR','PCS MTR','PCS MTRS','PCS','MTR','METERS','PIECES'] },
-    { key:'veh',      label:'VEH./BILTY NO.', syn:['VEH./BILTY NO.','VEH BILTY NO','VEHICLE NO','BILTY NO','VEH NO'] },
-    { key:'plant',    label:'PLANT/TYPE',    syn:['PLANT/TYPE','PLANT TYPE','PLANT','TYPE'] }
+    { key:'rolls',    label:'ROLLS/BAGS',    syn:['ROLLS/BAGS','ROLLS BAGS','ROLLSBAGS','ROLLS','BAGS','NO OF ROLLS'] },
+    { key:'pcsmtr',   label:'PCS/MTR',       syn:['PCS/MTR','PCS MTR','PCSMTR','PCS MTRS','PCS','MTR','METERS','PIECES'] },
+    { key:'veh',      label:'VEH./BILTY NO.', syn:['VEH./BILTY NO.','VEH BILTY NO','VEHBILTY_NO','VEHICLE NO','BILTY NO','VEH NO'] },
+    { key:'plant',    label:'PLANT/TYPE',    syn:['PLANT/TYPE','PLANT TYPE','PLANTTYPE','PLANT','TYPE'] }
   ];
 
   // ── small utilities ──────────────────────────────────────────
