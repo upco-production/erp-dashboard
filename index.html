@@ -9823,6 +9823,18 @@ function rowsFromResponse(json, key){
 function normKeyRow(r){ const o={}; Object.entries(r||{}).forEach(([k,v])=>o[String(k).trim().replace(/\s+/g,'_').toUpperCase()]=v); return o; }
 function normalizeUserRow(r){ const n=normKeyRow(r); const perms=String(n.PERMISSIONS||n.PERMISSION||'').toLowerCase(); return {username:n.USERNAME||n.USER||'', password:n.PASSWORD||'', role:n.ROLE||'OPERATOR', name:n.PERSON_NAME||n.NAME||n.DISPLAY_NAME||n.USERNAME||'', dept:n.DEPARTMENT||n.DEPT||'ALL', canEdit:/edit|write|admin/.test(perms), canImport:/import|admin/.test(perms), canExport:/export|admin/.test(perms), canDelete:/delete|admin/.test(perms), status:n.STATUS||'ACTIVE'}; }
 function normalizeProdSheetRow(r){ const n=normKeyRow(r); const dept=n.DEPARTMENT||n.DEPT||n.PROCESS||'Production'; const date=n.PRODUCTION_DATE||n.DATE||''; const pcs=(()=>{const v=Number(n.PRODUCTION_PCS||n.PRODUCED_PCS||n.BAGS_PRODUCED||n.OUTPUT_PCS||n.QTY_PCS||n.BAG_PCS||n.TOTAL_PCS||n.PIECES||n.PRODUCTION_IN_PCS||0);if(v>0)return v;for(const k of Object.keys(n)){if(k.includes('PCS')&&!k.includes('WASTE')&&!k.includes('PCT')){const nv=Number(n[k]||0);if(nv>0)return nv;}}return 0;})(); return normalizeProductionRow(Object.assign({}, r, {id:n.ID||Date.now()+Math.random(), month:n.MONTH||keyFromISO(date)||APP.currentMonth, PRODUCTION_DATE:date, Department:dept, MACHINE_NO:n.MACHINE_NO||n.MACHINE||'', SHIFT:n.SHIFT||'', SHIFT_INCHARGE:n.SHIFT_INCHARGE||n.INCHARGE||'', SAP_STATUS:n.SAP_STATUS||n.STATUS||'', SAP_SFG_NO:n.SAP_SFG_NO||n.SFG_CODE||n.SFG||'', SAP_PO:n.SAP_PO||n.PO||'', JOB_NAME:n.JOB_NAME||n.JOB||'', PRODUCTION_KG:n.PRODUCTION_KG||n.PRODUCED_QUANTITY||n.QTY_KG||n.QUANTITY||0, PRODUCTION_PCS:pcs, PRODUCTION_METER:n.PRODUCTION_METER||n.PRODUCTION_METERS||n.METER||0, TOTAL_WASTE_KG:n.TOTAL_WASTE_KG||n.TOTAL_WASTE||n.WASTAGE||0, TOTAL_WASTE_PCT:n.TOTAL_WASTE_PCT||n.WASTAGE_PCT||0, TOTAL_TECHNICAL_DOWNTIME_MIN:n.TOTAL_TECHNICAL_DOWNTIME_MIN||n.TECHNICAL_DOWNTIME||n.DOWNTIME||0, EE_PCT:n.EE_PCT||n.EE||0, OEE_PCT:n.OEE_PCT||n.OEE||0, CREATED_BY:n.CREATED_BY||'', CREATED_AT:n.CREATED_AT||''})); }
+// Deduplicate production data by __DEPT + __ROW
+function dedupProductionData(rows){
+  if(!Array.isArray(rows)) return rows;
+  var seen = {};
+  return rows.filter(function(r){
+    var key = (r.__DEPT||r.dept||'') + '-' + (r.__ROW||'') + '-' + (r.PRODUCTION_DATE||r.date||'');
+    if(seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
+}
+
 async function syncOneSource(key){
   const cfg=ERP_SHEET_CONFIG.SOURCES[key];
   try{
@@ -11020,20 +11032,26 @@ window.sseRunSync = async function(dept, fromDate){
   try{
     debugLog('info','SSE sync started', dept + (fromDate?' from '+fromDate:''));
 
+    // Reset production data to 0 before sync — ensures clean fresh data
+    APP.productionData = [];
+    try{ localStorage.removeItem('sdc_frozen_v1'); }catch(e){}
+    try{ localStorage.removeItem('sdc_live_v1'); }catch(e){}
+    try{ localStorage.removeItem('sdc_meta_v1'); }catch(e){}
+
     if(dept === 'ALL'){
       // Sync system master first
       await syncOneSource('SYSTEM_MASTER');
       await syncOneSource('MASTER_DATA');
       await syncOneSource('PLANNING');
       await syncOneSource('WIP');
-      // Then all INCHARGE (open months only)
+      // Fetch all 6 months fresh from sheet
       const rows = await sseFetchDept('ALL', fromDate);
       sseApplyRows(rows);
       debugLog('ok','SSE ALL sync done', rows.length+' rows (6 months)');
-      // Save to SDC so locked months stay in charts after re-lock
+      // Save fresh data to SDC cache
       if(typeof sdcSave==='function') try{ sdcSave(APP.productionData); }catch(e){}
     } else {
-      // Single dept
+      // Single dept — still reset first
       const rows = await sseFetchDept(dept, fromDate);
       sseApplyRows(rows);
       debugLog('ok','SSE '+dept+' sync done', rows.length+' rows');
@@ -19488,18 +19506,6 @@ function lsSet(key, val){
 }
 
 // -- Save: split productionData into frozen + live --------------------------
-
-// Deduplicate production data by __DEPT + __ROW
-function dedupProductionData(rows){
-  if(!Array.isArray(rows)) return rows;
-  var seen = {};
-  return rows.filter(function(r){
-    var key = (r.__DEPT||r.dept||'') + '-' + (r.__ROW||'') + '-' + (r.PRODUCTION_DATE||r.date||'');
-    if(seen[key]) return false;
-    seen[key] = true;
-    return true;
-  });
-}
 
 function sdcSave(allRows){
   if(!Array.isArray(allRows) || !allRows.length) return;
