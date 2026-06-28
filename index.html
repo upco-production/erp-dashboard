@@ -11418,7 +11418,11 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
         const _allRows=(_edata.ok&&_edata.rows)?_edata.rows:[];
         log('ok','INCHARGE/ALL',_allRows.length+' rows (from '+_sixMonthsAgo+')');
         const _prod=_allRows.filter(r=>['PRINTING','LAMINATION','SLITTING','BAG_MAKING'].includes(String(r.__DEPT||'').toUpperCase()));
-        APP.productionData=_prod.map(r=>{ try{ return normalizeRow(r,r.__DEPT+'_IMPORT'); }catch(e){ return r; } });
+        APP.productionData=_prod.map(r=>{
+          try{ return upNormalizeProductionByTab(r, r.__DEPT+'_IMPORT'); }catch(e){ return r; }
+        });
+        // Save to SDC cache so locked months stay available after re-lock
+        if(typeof sdcSave==='function') setTimeout(function(){ try{ sdcSave(APP.productionData); }catch(e){} }, 300);
         APP.inkData       =_allRows.filter(r=>String(r.__DEPT||'')==='INK').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.PRODUCTION_DATE||'')}));
         APP.ncrData       =_allRows.filter(r=>String(r.__DEPT||'')==='QUALITY').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||'')}));
         APP.dispatchData  =_allRows.filter(r=>String(r.__DEPT||'')==='DISPATCH');
@@ -19652,7 +19656,7 @@ setTimeout(function(){
     var sdcRows = sdcLoad();
     if(!sdcRows.length) return;
 
-    // Only inject if APP.productionData is missing or empty
+    // Always inject SDC rows — locked months still needed for charts (read-only)
     var existing = window.APP && APP.productionData;
     if(!Array.isArray(existing) || existing.length === 0){
       if(window.APP) APP.productionData = sdcRows;
