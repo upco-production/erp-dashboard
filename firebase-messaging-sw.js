@@ -1,18 +1,20 @@
 // ============================================================
-// firebase-messaging-sw.js
+// firebase-messaging-sw.js — UP ERP v2.0
 // Universal Packaging ERP — FCM Service Worker
 //
-// DEPLOY: Place this file in the SAME directory as UP_ERP_v26.html
-// (or your web server root). It MUST be served from the same origin.
+// DEPLOY: Same directory as index.html (web server root)
+// Must be served from same origin.
 //
-// This handles BACKGROUND push notifications when the ERP tab
-// is closed or in the background.
+// Features:
+//   - Rich lock screen notifications (like WhatsApp)
+//   - Background push when Chrome closed / phone locked
+//   - Tap → opens ERP directly on Maintenance tab
+//   - Action buttons: My Queue | View | Dismiss
 // ============================================================
 
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
 
-// ── YOUR Firebase config (replace with your project values) ──
 const firebaseConfig = {
   apiKey:            "AIzaSyCbJ8T53-qfez9x5xHgekoxV-GQtxfF-Jo",
   authDomain:        "up-erp-dashboard.firebaseapp.com",
@@ -25,37 +27,113 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
+// ── ERP URL (update if your domain changes) ───────────────────
+const ERP_URL = 'https://upco-dashboard.netlify.app';
+
+// ── Months for date formatting ────────────────────────────────
+const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+
+function fmtDatetime(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const day  = String(d.getDate()).padStart(2, '0');
+    const mon  = MONTHS[d.getMonth()];
+    const yr   = d.getFullYear();
+    let   hr   = d.getHours();
+    const min  = String(d.getMinutes()).padStart(2, '0');
+    const ampm = hr >= 12 ? 'PM' : 'AM';
+    hr = hr % 12 || 12;
+    return day + '-' + mon + '-' + yr + ', ' + String(hr).padStart(2,'0') + ':' + min + ' ' + ampm;
+  } catch(e) { return iso; }
+}
+
+// ── Build rich notification body ──────────────────────────────
+// Format matches the mockup image:
+//   ME/PT/26/06/015 | ROTO-01 | Printing
+//   [description]
+//   Priority: HIGH    Status: OPEN
+//   Dept: Printing    Machine: ROTO-01
+//   Type: ME          Date & Time: 27-JUN-2026, 10:22 AM
+//   Requested By: @BAQIR
+function buildNotification(d, n) {
+  const notifNo    = d.notifNo    || d.reqId  || '';
+  const machine    = d.machine    || '';
+  const dept       = d.reqDept    || d.dept   || '';
+  const type       = d.reqType    || d.type   || '';
+  const priority   = d.priority   || '';
+  const status     = d.status     || '';
+  const desc       = d.description|| n.body   || '';
+  const requestedBy= d.requestedBy|| d.submittedByUser || '';
+  const submittedAt= d.submittedAt|| d.timestamp || new Date().toISOString();
+  const event      = d.event      || '';
+
+  // Title: NotifNo | Machine | Dept
+  const titleParts = [notifNo, machine, dept].filter(Boolean);
+  const title = titleParts.length ? titleParts.join(' | ') : (n.title || '🔔 Maintenance Alert');
+
+  // Event label for context
+  const eventLabels = {
+    newRequest  : '🆕 New maintenance request created',
+    accepted    : '✅ Request accepted by technical team',
+    rejected    : '❌ Request rejected',
+    techComplete: '🔧 Repair complete — please verify',
+    confirmed   : '🔒 Request confirmed and locked',
+  };
+  const eventLine = eventLabels[event] || n.body || 'Maintenance update';
+
+  // Body: structured like the mockup
+  const lines = [];
+  // @Username first — short and clear
+  if (requestedBy) lines.push('@' + requestedBy + ' — ' + (dept||''));
+  // Description (short)
+  if (desc) lines.push(desc.slice(0, 80) + (desc.length > 80 ? '…' : ''));
+  lines.push('');
+  // Key info only — no Type
+  if (priority || status)
+    lines.push(priority + '  |  ' + status);
+  if (machine)
+    lines.push(machine + '  |  ' + fmtDatetime(submittedAt));
+  lines.push('Tap to open in ERP →');
+
+  return { title, body: lines.join('\n') };
+}
+
 // ── Background message handler ────────────────────────────────
-// Fires when a push arrives and the ERP tab is NOT in focus.
-// Firebase auto-shows a system notification using `notification`
-// payload; this handler lets us customise click behaviour.
 messaging.onBackgroundMessage(function(payload) {
-  console.log('[SW] Background push received:', payload);
+  console.log('[SW] Background push:', payload);
 
   const n = payload.notification || {};
-  const d = payload.data || {};
+  const d = payload.data         || {};
 
-  const title = n.title || d.title || '🔔 Maintenance Alert';
-  const body  = n.body  || d.body  || 'A maintenance event requires your attention.';
-  const icon  = n.icon  || '/favicon.ico';
-  const badge = n.badge || '/favicon.ico';
-  const tag   = d.reqId || d.tag   || 'maint-' + Date.now();
+  const { title, body } = buildNotification(d, n);
+
+  const reqId    = d.reqId || d.notifNo || '';
+  const priority = (d.priority || '').toUpperCase();
+  const event    = d.event || '';
+
+  // Deep link: open ERP on maintenance tab
+  const deepLink = ERP_URL + '/index.html#maintenance' + (reqId ? '?req=' + reqId : '');
 
   const options = {
     body,
-    icon,
-    badge,
-    tag,
-    requireInteraction: d.priority === 'CRITICAL', // stays visible until clicked for CRITICAL
+    icon : '/icon-192.png',
+    badge: '/icon-72.png',
+    tag  : reqId || ('maint-' + Date.now()),
+    // CRITICAL stays on screen until dismissed (like WhatsApp calls)
+    requireInteraction: priority === 'CRITICAL' || event === 'newRequest',
+    vibrate: priority === 'CRITICAL' ? [200,100,200,100,200] : [200,100,200],
     data: {
-      url:   d.url   || '/',
-      reqId: d.reqId || '',
-      tab:   d.tab   || 'requests'
+      url  : deepLink,
+      reqId: reqId,
+      event: event,
     },
     actions: [
+      { action: 'queue',   title: '📋 My Queue'    },
       { action: 'view',    title: '👁 View Request' },
-      { action: 'dismiss', title: 'Dismiss' }
-    ]
+      { action: 'dismiss', title: 'Dismiss'         },
+    ],
   };
 
   return self.registration.showNotification(title, options);
@@ -67,40 +145,76 @@ self.addEventListener('notificationclick', function(event) {
 
   if (event.action === 'dismiss') return;
 
-  const data = event.notification.data || {};
-  const targetUrl = data.url || '/';
+  const data  = event.notification.data || {};
   const reqId = data.reqId || '';
-  const tab   = data.tab   || 'requests';
+  const isQueue = event.action === 'queue';
+
+  // URL: maintenance tab, optionally highlight specific request
+  const targetUrl = isQueue
+    ? ERP_URL + '/index.html#maint-queue'
+    : ERP_URL + '/index.html#maintenance' + (reqId ? '?req=' + reqId : '');
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
-      // If ERP tab is already open, focus it and navigate to the request
+
+      // 1. ERP tab already open → focus + navigate
       for (const client of clientList) {
-        if (client.url.includes(targetUrl) && 'focus' in client) {
+        if (client.url.startsWith(ERP_URL)) {
           client.focus();
-          client.postMessage({ type: 'OPEN_MAINT_REQUEST', reqId, tab });
+          client.postMessage({
+            type  : 'OPEN_MAINT_REQUEST',
+            reqId : reqId,
+            tab   : isQueue ? 'queue' : 'requests',
+            event : data.event || '',
+          });
           return;
         }
       }
-      // Otherwise open a new tab
+
+      // 2. No tab open → open new window (works on Android Chrome, iOS Safari PWA)
       if (clients.openWindow) {
-        return clients.openWindow(targetUrl + (reqId ? '#maint-' + reqId : ''));
+        return clients.openWindow(targetUrl);
       }
     })
   );
 });
 
-// ── Push event (fallback if onBackgroundMessage doesn't fire) ─
+// ── Push fallback (if onBackgroundMessage doesn't fire) ───────
 self.addEventListener('push', function(event) {
-  if (event.data) {
-    try {
-      const payload = event.data.json();
-      // onBackgroundMessage handles this — only log here as fallback
-      console.log('[SW] Raw push event data:', payload);
-    } catch(e) {
-      console.log('[SW] Raw push text:', event.data.text());
+  if (!event.data) return;
+  try {
+    const payload = event.data.json();
+    console.log('[SW] Raw push:', payload);
+
+    // If Firebase didn't handle it, show manually
+    const n = payload.notification || {};
+    const d = payload.data         || {};
+
+    if (n.title || d.title) {
+      const { title, body } = buildNotification(d, n);
+      event.waitUntil(
+        self.registration.showNotification(title, {
+          body,
+          icon: '/icon-192.png',
+          badge:'/icon-72.png',
+          tag  : d.reqId || ('maint-' + Date.now()),
+          requireInteraction: (d.priority||'').toUpperCase() === 'CRITICAL',
+          data : { url: ERP_URL + '/index.html#maintenance', reqId: d.reqId || '' },
+          actions: [
+            { action: 'queue',   title: '📋 My Queue'    },
+            { action: 'view',    title: '👁 View Request' },
+            { action: 'dismiss', title: 'Dismiss'         },
+          ],
+        })
+      );
     }
+  } catch(e) {
+    console.log('[SW] Push parse error:', e.message);
   }
 });
 
-console.log('[SW] firebase-messaging-sw.js loaded — UP ERP push ready');
+// ── Service Worker lifecycle ──────────────────────────────────
+self.addEventListener('install',  () => self.skipWaiting());
+self.addEventListener('activate', e  => e.waitUntil(clients.claim()));
+
+console.log('[SW] UP ERP firebase-messaging-sw.js v2.0 loaded');
