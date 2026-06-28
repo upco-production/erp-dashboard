@@ -14998,15 +14998,10 @@ function isAdmin(){
   return r==='MAIN_ADMIN';
 }
 function isTech(){
-  // Use the global helper if available
   if(typeof window.isTechnicalTeam==='function'&&window.isTechnicalTeam()) return true;
-  // Fallback: check role directly on APP.currentUser
   const r=String(APP?.currentUser?.role||'').trim().toUpperCase();
-  // TECH_ roles (field technicians)
   if(/^TECH_(MECHANICAL|ELECTRICAL|UTILITIES)$/.test(r)) return true;
-  // Incharge roles for mechanical/electrical/utility departments
   if(/^(MECH|ELEC|UTIL)_INCHARGE$/.test(r)) return true;
-  // Tech manager and utility tech roles
   if(r==='TECH_MANAGER'||r==='TECH_UTILITY') return true;
   return false;
 }
@@ -15049,25 +15044,23 @@ function userDeptScope(){
 }
 
 // Get the maintenance TYPE this technical user is scoped to (null = see all types)
-// MECH_INCHARGE -> ME, ELEC_INCHARGE -> EE, UTIL_INCHARGE -> UT
-// TECH_MANAGER dept=MECHANICAL -> ME, dept=ELECTRICAL -> EE, dept=UTILITY -> UT
-// TECH_UTILITY -> UT
+// PM requests go to MECHANICAL team
 function techTypeScope(){
   const r = curRole();
-  if(r === 'MECH_INCHARGE') return 'ME';
-  if(r === 'ELEC_INCHARGE') return 'EE';
-  if(r === 'UTIL_INCHARGE') return 'UT';
-  if(/^TECH_(MECHANICAL)$/.test(r)) return 'ME';
-  if(/^TECH_(ELECTRICAL)$/.test(r)) return 'EE';
-  if(/^TECH_(UTILITIES)$/.test(r)) return 'UT';
-  if(r === 'TECH_UTILITY') return 'UT';
+  if(r === 'MECH_INCHARGE')    return 'ME';
+  if(r === 'ELEC_INCHARGE')    return 'EE';
+  if(r === 'UTIL_INCHARGE')    return 'UT';
+  if(r === 'TECH_MECHANICAL')  return 'ME';
+  if(r === 'TECH_ELECTRICAL')  return 'EE';
+  if(r === 'TECH_UTILITIES')   return 'UT';
+  if(r === 'TECH_UTILITY')     return 'UT';
   if(r === 'TECH_MANAGER'){
     const dept = String(APP?.currentUser?.dept||'').trim().toUpperCase();
     if(dept === 'MECHANICAL') return 'ME';
     if(dept === 'ELECTRICAL') return 'EE';
     if(dept === 'UTILITY' || dept === 'UTILITIES') return 'UT';
   }
-  return null; // no type restriction
+  return null;
 }
 
 // Is user a production dept incharge (any dept)?
@@ -15102,25 +15095,33 @@ function canSubmit(){
   return true;
 }
 
-// Is this request visible to current user? (dept-scoped filter)
+// Is this request visible to current user?
+// MANAGER/DIRECTOR/MAIN_ADMIN → see ALL
+// Technical roles → see by TYPE (ME/EE/UT), PM goes to ME team
+// Production incharges → see only their dept requests
 function canSeeMaintReq(req){
   if(isAdmin()) return true;
   if(typeof window.isMainAdmin==='function'&&window.isMainAdmin()) return true;
+  const r = curRole();
+  // MANAGER/DIRECTOR see all
+  if(r==='MANAGER'||r==='DIRECTOR') return true;
 
-  // Technical team: filter by request TYPE (ME/EE/UT), not production dept
+  // Technical team: filter by TYPE
   const tScope = techTypeScope();
   if(tScope !== null){
     const reqType = String(g(req,'type')||'').trim().toUpperCase();
-    const aliases = {ME:['ME','MECHANICAL'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
+    // PM requests go to MECHANICAL (ME) team
+    const aliases = {
+      ME:['ME','MECHANICAL','PM'],
+      EE:['EE','ELECTRICAL'],
+      UT:['UT','UTILITIES','UTILITY']
+    };
     return (aliases[tScope]||[tScope]).indexOf(reqType) > -1;
   }
 
-  // Always show requests submitted by this user (regardless of dept)
-  if(g(req,'submittedByUser')===curUser()) return true;
-
-  // Production dept users: show ALL requests from their department
+  // Production dept users: show only their dept
   const scope = userDeptScope();
-  if(!scope) return true; // no restriction - see all
+  if(!scope) return true;
   return String(g(req,'dept')||'').trim() === scope;
 }
 // Can the logged-in user accept a maintenance request? (Stage 2)
@@ -15133,25 +15134,36 @@ function canAcceptMaint(){
   // Role fallback: only tech team can accept
   return isTech();
 }
-// Can this user fill Stage 3 (production-side closure) for this request?
-// Any user from the SAME DEPARTMENT can fill Stage 3 (not just the submitter)
+// Can this user fill Stage 3 (production-side closure)?
+// Any incharge from the SAME DEPT as the request can fill Stage 3
 function canStage3(r){
   if(isAdmin()) return true;
-  if(!canSubmit()) return false; // tech team cannot fill Stage 3
-  // Same dept as request OR submitted by this user
+  if(!canSubmit()) return false; // tech roles cannot fill Stage 3
   const reqDept = String(g(r,'dept')||'').trim();
   const myScope = userDeptScope();
+  // Dept match → allowed
   if(myScope && myScope === reqDept) return true;
+  // Submitted by me (even if dept somehow differs)
   if(g(r,'submittedByUser')===curUser()) return true;
   return false;
 }
 // Can this user fill Stage 4 (technical action report)?
 function canStage4(r){ return isAdmin()||(isTech()&&g(r,'assignedToUser')===curUser()); }
 // Can this user confirm/lock (Stage 5)?
+// TECH_MANAGER of matching dept confirms (ME/EE/UT + PM→ME)
 function canStage5(r){
   if(isAdmin()) return true;
-  const it=inchargeTeam();
-  return it&&g(r,'type')===it;
+  const role = curRole();
+  const reqType = String(g(r,'type')||'').trim().toUpperCase();
+  const pmAliases = {ME:['ME','MECHANICAL','PM'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
+  if(role==='TECH_MANAGER'){
+    const dept = String(APP?.currentUser?.dept||'').trim().toUpperCase();
+    const myType = dept==='MECHANICAL'?'ME':dept==='ELECTRICAL'?'EE':(dept==='UTILITY'||dept==='UTILITIES')?'UT':null;
+    return myType && (pmAliases[myType]||[]).indexOf(reqType)>-1;
+  }
+  // Legacy: MECH/ELEC/UTIL_INCHARGE also confirm (Stage 5)
+  const it = inchargeTeam();
+  return it && (pmAliases[it]||[]).indexOf(reqType)>-1;
 }
 
 function roleLabel(role){
@@ -15174,57 +15186,60 @@ function deptLabel(dept){
 }
 // -- Field map - exact MAINTENANCE_REQUESTS column names ------------------
 const F={
-  id:             'REQUEST_ID',
-  notifNo:        'NOTIFICATION_NO',
-  requestDate:    'REQUEST_DATE',
-  requestTime:    'REQUEST_TIME',
-  submittedAt:    'SUBMITTED_AT',
-  dept:           'DEPARTMENT',
-  machine:        'MACHINE',
-  type:           'REQUEST_TYPE',
-  priority:       'PRIORITY',
-  effect:         'EFFECT_ON_PRODUCTION',
-  description:    'DESCRIPTION',
-  requestedBy:    'REQUESTED_BY',
-  submittedByUser:'SUBMITTED_BY_USER',
-  shift:          'SHIFT',
-  contact:        'CONTACT',
-  status:         'STATUS',
-  // Stage 2 - accept
-  acceptedBy:     'ACCEPTED_BY',
-  acceptedAt:     'ACCEPTED_AT',
-  assignedTo:     'ASSIGNED_INCHARGE',
-  assignedToUser: 'ASSIGNED_TO_USER',
-  inchargeTeam:   'INCHARGE_TEAM',
-  responseMin:    'RESPONSE_TIME_MIN',
-  rejectedBy:     'REJECTED_BY',
-  rejectedAt:     'REJECTED_AT',
-  rejectionReason:'REJECTION_REASON',
-  // Stage 3 - production closure
-  arrivalTime:    'ARRIVAL_TIME',
-  machineStart:   'MACHINE_START',
-  closingTime:    'CLOSING_TIME',
-  downtimeMin:    'DOWNTIME_MIN',
-  productionLoss: 'PRODUCTION_LOSS',
-  wasteKg:        'WASTE_KG',
-  prodRemarks:    'PROD_REMARKS',
-  // Stage 4 - technical action
-  actionTaken:    'ACTION_TAKEN',
-  rootCause:      'ROOT_CAUSE',
-  preventiveAction:'PREVENTIVE_ACTION',
-  partsUsed:      'PARTS_USED',
-  followUp:       'FOLLOW_UP_REQUIRED',
-  followUpDate:   'FOLLOW_UP_DATE',
-  techRemarks:    'TECH_REMARKS',
-  // Stage 5 - confirm / lock
-  confirmedBy:    'CONFIRMED_BY',
-  confirmedAt:    'CONFIRMED_AT',
-  reviewComments: 'REVIEW_COMMENTS',
-  // Meta
-  accordWaste:    'ACCORD_WASTE',
-  imageUrl:       'IMAGE_URL',
-  updatedBy:      'LAST_UPDATED_BY',
-  updatedAt:      'LAST_UPDATED_AT'
+  // -- Core identity ----------------------------------------------------------
+  id:             'AUTO_MR0001',                          // MR-0001, MR-0002...
+  notifNo:        'AUTO_MNTYYYYMM001',                    // EE/PT/26/06/001
+  requestDate:    'AUTO_25JUN2026',                       // 2026-06-25T00:00:00
+  requestTime:    'AUTO_1435',                            // 14:35
+  submittedAt:    'AUTO_ISO_TIMESTAMP',                   // ISO timestamp
+  // -- Stage 1 - submission --------------------------------------------------
+  dept:           'PRINTING__LAMINATION__SLITTING__BAG_MAKING',
+  machine:        'ROTO01__SS01__SM01__BOX_POUCH_ETC',
+  type:           'MECHANICAL__ELECTRICAL__UTILITIES__PM__ALL_TYPE_CONCERN_DEPT',
+  priority:       'CRITICAL__HIGH__MEDIUM__LOW',
+  effect:         'STOPPED__REDUCED__RUNNING_WITH_RISK__NO_IMPACT',
+  description:    'FULL_DESCRIPTION_OF_THE_PROBLEM',
+  requestedBy:    'NAME_OF_PERSON_WHO_RAISED_THE_REQUEST',
+  submittedByUser:'AUTO_USERNAME_FROM_LOGIN',
+  shift:          'A__B__C',
+  contact:        'EXTENSION_OR_MOBILE',
+  accordWaste:    'ACCORD_WASTE_KG_ENTERED_AT_SUBMISSION',
+  imageUrl:       'BASE64_IMAGE_OR_URL_ATTACHED_TO_REQUEST',
+  // -- Status ----------------------------------------------------------------
+  status:         'OPENPENDINGACCEPTEDIN_PROGRESSCOMPLETEDCLOSEDFOLLOW_UPUNDER_OBSERVATIONCONFIRMEDLOCKEDREJECTED',
+  // -- Stage 2 - accept/reject -----------------------------------------------
+  acceptedBy:     'TECHNICAL_TEAM_MEMBER_WHO_ACCEPTED',
+  acceptedAt:     'TIMESTAMP_WHEN_ACCEPT_TAPPED',
+  assignedTo:     'TECHNICAL_INCHARGE_ASSIGNED',
+  assignedToUser: 'AUTO_USERNAME',
+  inchargeTeam:   'MECHANICAL__ELECTRICAL__UTILITIES__PM',
+  responseMin:    'AUTO_ACCEPTED_AT__SUBMITTED_AT',
+  rejectedBy:     'IF_REJECTED_NAME',
+  rejectedAt:     'IF_REJECTED_TIMESTAMP',
+  rejectionReason:'REASON_TYPED_WHEN_REJECTING',
+  // -- Stage 3 - production closure ------------------------------------------
+  arrivalTime:    'WHEN_TECHNICAL_TEAM_PHYSICALLY_ARRIVED',
+  machineStart:   'WHEN_MACHINE_RESTARTED',
+  closingTime:    'WHEN_ISSUE_WAS_FULLY_RESOLVED',
+  downtimeMin:    'AUTO_CLOSING_TIME__ARRIVAL_TIME',
+  productionLoss: 'EG_800_KG_OR_2500_M',
+  wasteKg:        'WASTE_GENERATED_DURING_DOWNTIME_KG',
+  prodRemarks:    'PRODUCTION_SIDE_OBSERVATIONS',
+  // -- Stage 4 - technical action --------------------------------------------
+  actionTaken:    'EXACTLY_WHAT_WAS_DONE',
+  rootCause:      'WHY_IT_HAPPENED',
+  preventiveAction:'WHAT_TO_DO_TO_PREVENT_RECURRENCE',
+  partsUsed:      'SPARE_PARTS__MATERIALS_CONSUMED',
+  followUp:       'YES__NO',
+  followUpDate:   'DATE_FOR_FOLLOWUP_CHECK',
+  techRemarks:    'ADDITIONAL_TECHNICAL_OBSERVATIONS',
+  // -- Stage 5 - confirm/lock ------------------------------------------------
+  confirmedBy:    'NAME_OF_INCHARGE_WHO_CONFIRMED',
+  confirmedAt:    'TIMESTAMP_OF_CONFIRMATION',
+  reviewComments: 'INCHARGE_REVIEW_NOTES',
+  // -- Meta ------------------------------------------------------------------
+  updatedBy:      'USERNAME_OF_LAST_EDITOR',
+  updatedAt:      'TIMESTAMP_OF_LAST_EDIT'
 };
 function g(r,k){ return r[F[k]]??''; }
 function s(r,k,v){ r[F[k]]=v; }
@@ -15957,11 +15972,12 @@ window.submitMaintRequest=async function(){
       // ME requests -> MECH_INCHARGE, TECH_MECHANICAL, TECH_MANAGER(MECHANICAL)
       // EE requests -> ELEC_INCHARGE, TECH_ELECTRICAL, TECH_MANAGER(ELECTRICAL)
       // UT requests -> UTIL_INCHARGE, TECH_UTILITIES, TECH_UTILITY
+      // PM notifications go to MECHANICAL team
       const _typeRoleMap={
         'ME':['MECH_INCHARGE','TECH_MECHANICAL','TECH_MANAGER'],
         'EE':['ELEC_INCHARGE','TECH_ELECTRICAL','TECH_MANAGER'],
         'UT':['UTIL_INCHARGE','TECH_UTILITIES','TECH_UTILITY','TECH_MANAGER'],
-        'PM':['MECH_INCHARGE','ELEC_INCHARGE','UTIL_INCHARGE','TECH_MANAGER']
+        'PM':['MECH_INCHARGE','TECH_MECHANICAL','TECH_MANAGER']
       };
       const _tRoles=_typeRoleMap[String(typeCode||type||'').toUpperCase()]||[];
       _fcmPush('newRequest', _newRow, {status:'OPEN', targetRoles:_tRoles, reqDept:dept, reqType:typeCode||type});
