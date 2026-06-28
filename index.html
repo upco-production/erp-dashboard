@@ -692,11 +692,11 @@ tr:hover td{background:rgba(255,255,255,.02)}
         </div>
         <div class="header-time" id="live-clock"></div>
         <button class="btn btn-primary btn-sm" id="sync-now-btn" onclick="syncNowClick()" title="Sync Now - fetch fresh data from Google Sheets. Cache auto-saves every 10s and is valid for 1 hour.">🔄 Sync Now</button>
-        <!-- Notification silent toggle -->
-        <button id="notif-silent-btn" onclick="window.toggleNotifSilent()"
-          title="Notifications ON - click to silence"
-          style="background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:14px;padding:4px 8px;color:var(--text2);transition:opacity .2s"
-          >🔔</button>
+        <!-- Notification bell -->
+        <button id="notif-silent-btn" onclick="window.handleNotifBtnClick()"
+          title="Enable mobile notifications"
+          style="background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:14px;padding:4px 8px;color:var(--text2);transition:all .2s;position:relative"
+          >🔔<span id="notif-cross" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;line-height:14px;text-align:center;font-style:normal">✕</span></button>
         <button class="btn btn-outline btn-sm" onclick="exportData()">📥 Excel</button>
         <button class="btn btn-outline btn-sm" onclick="exportPDF()">📄 PDF</button>
         <!-- User menu dropdown -->
@@ -11321,6 +11321,30 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
     }
   }
   window.syncLiveV4=syncLiveV4;
+  // Handle notification deep link on page open
+  // If SW opened ERP via #maintenance?req=MR-0001
+  (function(){
+    var hash = window.location.hash || '';
+    if(hash.indexOf('maintenance') > -1 || hash.indexOf('maint-') > -1){
+      var reqMatch = hash.match(/[?&]req=([^&]+)/);
+      var reqId = reqMatch ? reqMatch[1] : '';
+      // Wait for app to load then navigate
+      setTimeout(function(){
+        try{
+          if(typeof navigate === 'function') navigate('maintenance');
+          if(reqId){
+            setTimeout(function(){
+              try{
+                if(typeof window.openMaintDetail === 'function')
+                  window.openMaintDetail(decodeURIComponent(reqId));
+              }catch(e){}
+            }, 800);
+          }
+        }catch(e){}
+      }, 1200);
+    }
+  })();
+
   // Auto-sync on login
   var _origDoLoginV4=window.doLogin;
   window.doLogin=async function(){
@@ -15702,11 +15726,11 @@ const byT=t=>{
           const dt=diffMin(g(r,'arrivalTime'),g(r,'closingTime'));
           return `<tr onclick="window.openMaintDetail('${g(r,'id')}')" style="cursor:pointer">
             <td style="font-family:monospace;color:var(--cyan);white-space:nowrap">${g(r,'notifNo')||g(r,'id')}</td>
-            <td style="white-space:nowrap">${g(r,'requestDate')||String(g(r,'submittedAt')).slice(0,10)}</td>
-            <td>${g(r,'requestTime')||'-'}</td>
+            <td style="white-space:nowrap">${(()=>{const _d=g(r,'requestDate')||g(r,'submittedAt')||'';try{const _dt=new Date(_d);return isNaN(_dt)?_d:fmtDate(_dt);}catch(e){return _d||'-';}})()}</td>
+            <td style="white-space:nowrap">${(()=>{const _t=g(r,'requestTime')||'';if(!_t||_t==='-') return '-';if(/AM|PM/i.test(_t)) return _t;try{const _dt=new Date('2000-01-01T'+_t);return isNaN(_dt)?_t:fmtTime(_dt);}catch(e){return _t;}})()}</td>
             <td>${g(r,'dept')||'-'}</td><td>${g(r,'type')||'-'}</td>
             <td>${pBadge(g(r,'priority'))}</td><td>${sBadge(g(r,'status'))}</td>
-            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g(r,'description')||'-'}</td>
+            <td style="max-width:350px;min-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${g(r,'description')||''}">${g(r,'description')||'-'}</td>
             <td>${g(r,'requestedBy')||'-'}</td>
             <td style="color:var(--purple)">${g(r,'assignedTo')||'-'}</td>
             <td>${dt!==null?dt+' min':'-'}</td>
@@ -16078,7 +16102,7 @@ function renderMaintQueue(){
         ${mine.map(r=>`<tr>
           <td style="font-family:monospace;color:var(--cyan);white-space:nowrap">${g(r,'notifNo')||g(r,'id')}</td>
           <td>${g(r,'requestDate')||String(g(r,'submittedAt')).slice(0,10)}</td>
-          <td>${g(r,'requestTime')||'-'}</td>
+          <td style="white-space:nowrap">${(()=>{const _t=g(r,'requestTime')||'';if(!_t||_t==='-') return '-';if(/AM|PM/i.test(_t)) return _t;try{const _dt=new Date('2000-01-01T'+_t);return isNaN(_dt)?_t:fmtTime(_dt);}catch(e){return _t;}})()}</td>
           <td>${g(r,'dept')||'-'}</td>
           <td style="white-space:nowrap">${g(r,'machine')||'-'}</td>
           <td>${g(r,'type')||'-'}</td>
@@ -16169,14 +16193,14 @@ function _buildRows(reqs){
     const locked=g(r,'status')==='LOCKED';
     return `<tr>
       <td style="font-family:monospace;color:var(--cyan);white-space:nowrap">${g(r,'notifNo')||id}</td>
-      <td style="white-space:nowrap">${g(r,'requestDate')||String(g(r,'submittedAt')).slice(0,10)}</td>
-      <td>${g(r,'requestTime')||'-'}</td>
+      <td style="white-space:nowrap">${(()=>{const _d=g(r,'requestDate')||g(r,'submittedAt')||'';try{const _dt=new Date(_d);return isNaN(_dt)?_d:fmtDate(_dt);}catch(e){return _d||'-';}})()}</td>
+      <td style="white-space:nowrap">${(()=>{const _t=g(r,'requestTime')||'';if(!_t||_t==='-') return '-';if(/AM|PM/i.test(_t)) return _t;try{const _dt=new Date('2000-01-01T'+_t);return isNaN(_dt)?_t:fmtTime(_dt);}catch(e){return _t;}})()}</td>
       <td>${g(r,'dept')||'-'}</td>
       <td style="white-space:nowrap">${g(r,'machine')||'-'}</td>
       <td>${g(r,'type')||'-'}</td>
       <td>${pBadge(g(r,'priority'))}</td>
       <td>${sBadge(g(r,'status'))}</td>
-      <td style="max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px">${g(r,'description')||'-'}</td>
+      <td style="max-width:350px;min-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px" title="${g(r,'description')||''}">${g(r,'description')||'-'}</td>
       <td>${g(r,'requestedBy')||'-'}</td>
       <td style="color:var(--purple)">${g(r,'assignedTo')||'-'}</td>
       <td style="font-size:11px;white-space:nowrap">${fmt(g(r,'arrivalTime'))||'-'}</td>
@@ -17200,10 +17224,18 @@ if(typeof exportMaintCSV==="undefined") var exportMaintCSV=function(){};
 // -- FCM Push Helper - builds rich payload, respects silent mode ----------
 function _buildFcmData(r){
   return {
-    reqId:_fcmG(r)||g(r,'id'), notifNo:_fcmG(r)||g(r,'id'),
-    dept:g(r,'dept'), type:g(r,'type'), machine:g(r,'machine'),
-    priority:g(r,'priority')||'MEDIUM', status:g(r,'status'),
-    requestedBy:g(r,'requestedBy'), description:g(r,'description')
+    reqId         : _fcmG(r)||g(r,'id'),
+    notifNo       : _fcmG(r)||g(r,'id'),
+    reqDept       : g(r,'dept'),
+    reqType       : g(r,'type'),
+    machine       : g(r,'machine'),
+    priority      : g(r,'priority')||'MEDIUM',
+    status        : g(r,'status'),
+    requestedBy   : g(r,'requestedBy'),
+    submittedByUser: g(r,'submittedByUser'),
+    description   : g(r,'description'),
+    submittedAt   : g(r,'submittedAt')||new Date().toISOString(),
+    url           : window.location.href.split('#')[0],
   };
 }
 function _fcmG(r){ return g(r,'notifNo')||g(r,'id')||''; }
@@ -21110,40 +21142,110 @@ var SILENT_KEY = 'up_notif_silent_v1';
 window.isNotifSilent = function(){
   try{ return localStorage.getItem(SILENT_KEY) === '1'; }catch(e){ return false; }
 };
+
+// Bell button states:
+// YELLOW        = default, not yet asked → click to enable
+// GREEN  🔔     = granted, sound ON
+// GREEN  🔕     = granted, SILENT mode (notification comes, no sound/vibration)
+// GREEN  🔔 ✕  = denied/blocked → admin removes from sheet
+window.updateNotifBtn = function(status){
+  var btn = document.getElementById('notif-silent-btn');
+  if(!btn) return;
+  var perm   = (typeof Notification !== 'undefined') ? Notification.permission : 'default';
+  if(status) perm = status;
+  var silent = window.isNotifSilent();
+  var CROSS  = '<span id="notif-cross" style="position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;line-height:14px;text-align:center;font-style:normal">✕</span>';
+
+  if(perm === 'granted'){
+    if(silent){
+      // GREEN + 🔕 — silent mode
+      btn.innerHTML     = '🔕';
+      btn.title         = 'Silent mode ON — notifications arrive without sound. Click to turn sound ON';
+      btn.style.opacity = '1';
+      btn.style.borderColor = 'var(--green)';
+      btn.style.color       = 'var(--green)';
+    } else {
+      // GREEN + 🔔 — full notifications
+      btn.innerHTML     = '🔔';
+      btn.title         = 'Notifications ON with sound. Click to switch to silent mode';
+      btn.style.opacity = '1';
+      btn.style.borderColor = 'var(--green)';
+      btn.style.color       = 'var(--green)';
+    }
+  } else if(perm === 'denied'){
+    // GREEN + ✕ — blocked in browser, token still in sheet, admin removes
+    btn.innerHTML     = '🔔' + CROSS;
+    btn.title         = 'Notifications blocked in browser — contact admin to remove from sheet';
+    btn.style.opacity = '1';
+    btn.style.borderColor = 'var(--green)';
+    btn.style.color       = 'var(--green)';
+  } else {
+    // YELLOW — not yet asked
+    btn.innerHTML     = '🔔';
+    btn.title         = 'Click to enable mobile notifications';
+    btn.style.opacity = '0.7';
+    btn.style.borderColor = 'var(--yellow)';
+    btn.style.color       = 'var(--yellow)';
+  }
+};
+
+// Handle bell button click:
+// YELLOW  → request permission → enable → GREEN 🔔
+// GREEN 🔔 → toggle silent → GREEN 🔕 (notify without sound)
+// GREEN 🔕 → toggle silent → GREEN 🔔 (notify with sound)
+// GREEN ✕  → show info (blocked, admin handles)
+window.handleNotifBtnClick = async function(){
+  var perm = (typeof Notification !== 'undefined') ? Notification.permission : 'default';
+
+  if(perm === 'denied'){
+    if(typeof toast==='function')
+      toast('Notifications blocked in browser. Contact MAIN_ADMIN to remove token from FCM_TOKENS sheet.','info');
+    return;
+  }
+
+  if(perm === 'granted'){
+    // Toggle silent mode
+    var now = window.isNotifSilent();
+    try{ localStorage.setItem('up_notif_silent_v1', now ? '0' : '1'); }catch(e){}
+    window.updateNotifBtn();
+    if(typeof toast==='function')
+      toast(now ? '🔔 Sound ON — you will hear notification alerts' : '🔕 Silent mode — notifications arrive without sound', 'info');
+    return;
+  }
+
+  // YELLOW — not yet asked, request permission
+  if(typeof toast==='function') toast('Enabling notifications…','info');
+  if(window.upFCM && typeof window.upFCM.register === 'function'){
+    await window.upFCM.register();
+  }
+  window.updateNotifBtn();
+};
+
 window.toggleNotifSilent = function(){
   var now = window.isNotifSilent();
-  try{ localStorage.setItem(SILENT_KEY, now ? '0' : '1'); }catch(e){}
-  // Update bell button appearance
-  var btn = document.getElementById('notif-silent-btn');
-  if(btn){
-    btn.textContent = now ? '🔔' : '🔕';
-    btn.title = now ? 'Notifications ON - click to silence' : 'Notifications SILENCED - click to enable';
-    btn.style.opacity = now ? '1' : '0.5';
-  }
-  if(typeof toast==='function') toast(now ? '🔔 Notifications enabled' : '🔕 Notifications silenced','info');
+  try{ localStorage.setItem('up_notif_silent_v1', now ? '0' : '1'); }catch(e){}
+  window.updateNotifBtn();
 };
-// Patch sendPush to respect silent mode
+
+// Patch sendPush — in silent mode, pass silent:true flag so SW shows
+// notification WITHOUT sound/vibration (still visible on lock screen)
 (function(){
   var _origSendPush = window._fcmSendPush;
   if(typeof _origSendPush === 'function'){
     window._fcmSendPush = async function(event, data){
-      if(window.isNotifSilent()){
-        console.log('[FCM] Silent mode - suppressing push:', event);
-        return;
-      }
-      return _origSendPush(event, data);
+      // Add silent flag — SW will show notification without sound
+      var payload = Object.assign({}, data, {
+        silent: window.isNotifSilent() ? 'true' : 'false'
+      });
+      return _origSendPush(event, payload);
     };
   }
 })();
-// Init silent button state on load
+
+// Init bell button state on load
 setTimeout(function(){
-  var btn = document.getElementById('notif-silent-btn');
-  if(btn && window.isNotifSilent()){
-    btn.textContent = '🔕';
-    btn.title = 'Notifications SILENCED - click to enable';
-    btn.style.opacity = '0.5';
-  }
-}, 1000);
+  if(typeof window.updateNotifBtn === 'function') window.updateNotifBtn();
+}, 1200);
 </script>
 
 <script>
@@ -21678,10 +21780,34 @@ setTimeout(function(){
         }catch(e){ console.warn('[FCM] SW register failed:', e.message); }
       }
 
-      // Handle foreground messages
+      // Handle foreground messages (app is open)
       _messaging.onMessage(function(payload){
         console.log('[FCM] Foreground message:', payload);
         showFCMToast(payload);
+      });
+
+      // Handle SW → ERP messages (notification tap when tab was open)
+      navigator.serviceWorker.addEventListener('message', function(event){
+        var msg = event.data || {};
+        if(msg.type === 'OPEN_MAINT_REQUEST'){
+          console.log('[FCM] SW message: open maint', msg);
+          // Navigate to maintenance tab
+          if(typeof navigate === 'function'){
+            navigate('maintenance');
+            // If specific request, open its detail after short delay
+            if(msg.reqId){
+              setTimeout(function(){
+                try{
+                  if(typeof window.openMaintDetail === 'function'){
+                    window.openMaintDetail(msg.reqId);
+                  } else if(msg.tab === 'queue' && typeof renderMaintQueue === 'function'){
+                    renderMaintQueue();
+                  }
+                }catch(e){}
+              }, 500);
+            }
+          }
+        }
       });
 
       return true;
@@ -21706,23 +21832,63 @@ setTimeout(function(){
   async function requestAndRegisterToken(){
     try{
       var ok = await initFCM();
-      if(!ok) return;
-
-      var permission = await Notification.requestPermission();
-      if(permission !== 'granted'){
-        console.warn('[FCM] Permission denied');
+      if(!ok){
+        console.warn('[FCM] Init failed');
         return;
       }
 
+      // Check current permission status
+      var perm = Notification.permission;
+      if(perm === 'denied'){
+        console.warn('[FCM] Notifications blocked by user');
+        updateNotifBtn('blocked');
+        if(typeof toast==='function')
+          toast('Notifications blocked. Please enable in browser settings.','error');
+        return;
+      }
+
+      // Request permission if not yet granted
+      if(perm !== 'granted'){
+        perm = await Notification.requestPermission();
+      }
+
+      if(perm !== 'granted'){
+        console.warn('[FCM] Permission denied');
+        updateNotifBtn('denied');
+        return;
+      }
+
+      updateNotifBtn('granted');
+
+      // Get FCM token
       var token = await _messaging.getToken({ vapidKey: FCM_CONFIG.vapidKey });
-      if(!token){ console.warn('[FCM] No token received'); return; }
+      if(!token){
+        console.warn('[FCM] No token received — check VAPID key and SW registration');
+        return;
+      }
 
       _fcmToken = token;
-      console.log('[FCM] Token:', token.slice(0,20)+'...');
+      console.log('[FCM] Token obtained:', token.slice(0,20)+'...');
 
-      // Register token with Apps Script via Cloudflare proxy
+      // Save locally first
+      try{ localStorage.setItem('up_fcm_token', token); }catch(e){}
+
+      // Register token in FCM_TOKENS sheet via Apps Script
       var user = getUser();
-      if(!user){ console.warn('[FCM] No user logged in'); return; }
+      if(!user){ console.warn('[FCM] No user — token saved locally only'); return; }
+
+      // Device info for the sheet
+      var ua = navigator.userAgent;
+      var device = (
+        /iPhone|iPad/.test(ua) ? 'iOS' :
+        /Android/.test(ua)     ? 'Android' :
+        /Windows/.test(ua)     ? 'Windows' :
+        /Mac/.test(ua)         ? 'Mac' : 'Unknown'
+      ) + ' — ' + (
+        /Chrome/.test(ua)  ? 'Chrome' :
+        /Firefox/.test(ua) ? 'Firefox' :
+        /Safari/.test(ua)  ? 'Safari' : 'Browser'
+      );
 
       var res = await fetch(FCM_PROXY, {
         method : 'POST',
@@ -21732,14 +21898,19 @@ setTimeout(function(){
           username: user.username,
           token   : token,
           role    : user.role,
-          device  : navigator.userAgent.slice(0,50)
+          dept    : user.dept || '',
+          device  : device,
         })
       });
       var data = await res.json();
-      console.log('[FCM] Token registered:', data.ok ? '✅' : '❌', data);
 
-      // Save token locally
-      try{ localStorage.setItem('up_fcm_token', token); }catch(e){}
+      if(data.ok){
+        console.log('[FCM] Token saved in FCM_TOKENS sheet ✅', data.new ? '(new)' : '(updated)');
+        if(data.new && typeof toast==='function')
+          toast('🔔 Mobile notifications enabled!','success');
+      } else {
+        console.warn('[FCM] Sheet save failed:', data.error);
+      }
 
     }catch(e){ console.warn('[FCM] Register failed:', e.message); }
   }
