@@ -11509,6 +11509,8 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
 
   // Auto-sync on login REMOVED — user must click Sync Now
   window.syncAllSheets=window.syncAllSheets||syncLiveV4;
+  // Expose readTab globally so ACM and other modules can use it
+  window.readTab = readTab;
 })();
 </script>
 
@@ -19166,6 +19168,8 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
           mergeACMIntoUser(APP.currentUser, acmMap[ck]);
           // Re-apply sidebar visibility with fresh module data
           try{ if(typeof window.applySidebarRoles === 'function') window.applySidebarRoles(); }catch(e){}
+          // Re-apply after small delay to ensure sidebar DOM is ready
+          setTimeout(function(){ try{ if(typeof window.applySidebarRoles==='function') window.applySidebarRoles(); }catch(e){}}, 800);
         }
       }
 
@@ -22136,11 +22140,22 @@ setTimeout(function(){
     };
   }
 
-  /* -- If already logged in (auto-login), register token ------- */
+  /* -- If already logged in (auto-login), register token + load ACM --- */
   setTimeout(function(){
     try{
       var user = getUser();
-      if(user && user.username) requestAndRegisterToken();
+      if(user && user.username){
+        requestAndRegisterToken();
+        // Load ACM so sidebar restrictions apply immediately
+        setTimeout(async function(){
+          try{
+            if(typeof window.loadAndMergeACM === 'function'){
+              await window.loadAndMergeACM();
+              if(typeof window.applySidebarRoles === 'function') window.applySidebarRoles();
+            }
+          }catch(e){ console.warn('[ACM] Auto-load failed:', e.message); }
+        }, 500);
+      }
     }catch(e){}
   }, 2000);
 
