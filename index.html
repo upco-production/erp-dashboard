@@ -8160,8 +8160,9 @@ function fieldValue(r,f,dept){
     SAP_PO: firstRealValue(r,['SAP_PO','sapPO']),
     JOB_NAME: firstRealValue(r,['JOB_NAME','job']),
     TOTAL_JOB_TIME_MIN: displayNumValue(r,['TOTAL_JOB_TIME_MIN','totalJobTimeMin']),
-    PRODUCTION_KG: displayNumValue(r,['PRODUCTION_KG','productionKg','production']),
-    PRODUCTION_PCS: displayNumValue(r,['PRODUCTION_PCS','productionPcs','production']),
+    // Bag Making: production=PCS, so don't use 'production' as KG fallback
+    PRODUCTION_KG: displayNumValue(r,['PRODUCTION_KG','productionKg']),
+    PRODUCTION_PCS: displayNumValue(r,['PRODUCTION_PCS','productionPcs']),
     PRODUCTION_METER: (function(){ const v=+(r.PRODUCTION_METER||r.productionMeter||0); return v?Math.round(v):0; })(),
     PRODUCTION_MIN: displayNumValue(r,['PRODUCTION_MIN','PRODUCTION_RUNNING_MIN','productionMin','runningMin']),
     PRODUCTION_RUNNING_MIN: displayNumValue(r,['PRODUCTION_RUNNING_MIN','PRODUCTION_MIN','productionMin','runningMin']),
@@ -11506,12 +11507,7 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
     }
   })();
 
-  // Auto-sync on login
-  var _origDoLoginV4=window.doLogin;
-  window.doLogin=async function(){
-    if(typeof _origDoLoginV4==='function') await _origDoLoginV4.apply(this,arguments);
-    setTimeout(function(){ try{ syncLiveV4({silent:true}); }catch(e){} },800);
-  };
+  // Auto-sync on login REMOVED — user must click Sync Now
   window.syncAllSheets=window.syncAllSheets||syncLiveV4;
 })();
 </script>
@@ -12029,7 +12025,12 @@ navigate = (function(orig){
       //   3) Actual data fallback: the sheet's own EE_PCT, exactly as
       //      provided by the source data, so a real number is always shown
       //      rather than silently zeroing out.
-      if(meter>0 && eePmin>0 && speed>0){
+      const pcs = n(pick(r,['PRODUCTION_PCS','productionPcs'],0));
+      if(isBagMaking && pcs>0 && pmin>0 && speed>0){
+        // Bag Making: %EE = Standard Speed / (PCS / Running Min × FACTOR) × 100
+        // eeFactor is the FACTOR from Efficiency Center
+        r.ee = r2((speed / ((pcs / pmin) * (eeFactor||1))) * 100);
+      } else if(meter>0 && eePmin>0 && speed>0){
         r.ee = r2(((meter / eePmin) / speed) * 100);
       } else if(avgSpeed>0 && speed>0){
         r.ee = r2((avgSpeed / speed) * 100);
@@ -17950,8 +17951,11 @@ function normFG(r){
   const customerRaw  = v('CUSTOMER') ?? v('L') ?? '';
   const customer     = String(customerRaw === null || customerRaw === undefined ? '' : customerRaw).trim() || 'No Customer Mentioned';
 
-  // No separate PCS/METER column in this sheet — use unrestricted stock
-  const pcsMtrValue  = null;
+  // PCS/M value: show F+G sum ONLY if BASE_UNIT is PC or M
+  // If BASE_UNIT contains KG → blank (null)
+  const buUpper = baseUnit.toUpperCase().trim();
+  const isPcOrM = buUpper === 'PC' || buUpper === 'PCS' || buUpper === 'M' || buUpper === 'MTR' || buUpper === 'METER';
+  const pcsMtrValue = isPcOrM ? (unrestStock + qualStock) : null;
 
   return {
     customer,
