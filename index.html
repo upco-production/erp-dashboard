@@ -16295,7 +16295,7 @@ window.submitMaintRequest=async function(){
         'PM':['MECH_INCHARGE','TECH_MANAGER']
       };
       const _tRoles=_typeRoleMap[String(typeCode||type||'').toUpperCase()]||[];
-      _fcmPush('newRequest', _newRow, {
+      _fcmPush('new_request', _newRow, {
         status:'OPEN',
         targetRoles:_tRoles,
         reqDept:dept,
@@ -16960,7 +16960,7 @@ window.saveStage4=async function(id){
       'Lamination':['LAMINATION_INCHARGE','LAMINATION_SHIFT_INCHARGE'],
       'Slitting':['SLITTING_INCHARGE','SLITTING_SHIFT_INCHARGE'],
       'Bag Making':['BAG_MAKING_INCHARGE','BAG_MAKING_SHIFT_INCHARGE']};
-    _fcmPush('techComplete', r, {
+    _fcmPush('tech_complete', r, {
       status:'PENDING_REVIEW',
       targetRoles:(_deptRoleMap3[_tcDept]||[]).concat(['MANAGER','DIRECTOR','TECH_MANAGER']),
       targetUsers:[g(r,'submittedByUser')].filter(Boolean),
@@ -22335,7 +22335,7 @@ setTimeout(function(){
       var res = await fetch(FCM_PROXY, {
         method : 'POST',
         headers: {'Content-Type': 'application/json'},
-        body   : JSON.stringify(Object.assign({ action: 'fcm_send', event: event }, data||{}))
+        body   : JSON.stringify(Object.assign({ action: 'fcm_send', event: String(event||'').replace(/([A-Z])/g,'_$1').toLowerCase().replace(/^_/,'') }, data||{}))
       });
       return await res.json();
     }catch(e){ console.warn('[FCM] Send failed:', e.message); return {ok:false}; }
