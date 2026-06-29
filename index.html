@@ -9091,11 +9091,10 @@ function wastageDeptBreakdown(){
   });
   const [P, L, S, B] = deptData;
   // Printing: (waste/prod)/2 * 100 (wet/dry normalisation)
-  // Slit+BM:  (SlitWaste+BMWaste)/(SlitProd+BMProd) * 100
+  // Printing: /2, Lamination: standard, Slitting: individual, Slit+BM: combined
   const printPct  = P.prodKg>0 ? (P.totalW/P.prodKg)/2*100 : 0;
   const lamPct    = L.prodKg>0 ? (L.totalW/L.prodKg)*100   : 0;
-  const slitPct   = S.prodKg>0 ? (S.totalW/S.prodKg)*100 : 0;
-  const bmPct     = B.prodKg>0 ? (B.totalW/B.prodKg)*100 : 0;
+  const slitPct   = S.prodKg>0 ? (S.totalW/S.prodKg)*100   : 0;  // Slitting Waste KG / Slitting Prod KG %
   const slitBmPct = (S.prodKg+B.prodKg)>0 ? ((S.totalW+B.totalW)/(S.prodKg+B.prodKg))*100 : 0;
   const approvalPct  = P.prodKg>0 ? (P.approvalW/P.prodKg)*100 : 0;
   const extraTrimPct = S.prodKg>0 ? (S.extraW/S.prodKg)*100 : 0;
@@ -9105,7 +9104,9 @@ function wastageDeptBreakdown(){
   const overallPct   = printPct + lamPct + slitBmPct;
   const netPct       = Math.max(overallPct - approvalPct - extraTrimPct - technicalPct, 0);
   const per = deptData.map(d=>{
-    const pct = d.prodKg>0 ? (d.dept==='Printing'?(d.totalW/d.prodKg)/2*100:(d.totalW/d.prodKg)*100) : 0;
+    const pct = d.dept==='Printing'
+      ? (d.prodKg>0?(d.totalW/d.prodKg)/2*100:0)
+      : (d.prodKg>0?(d.totalW/d.prodKg)*100:0); // Lam, Slitting, BM: standard formula
     return {...d, totalPct:pct,
       approvalPct: d.prodKg>0?(d.approvalW/d.prodKg)*100:0,
       techPct:     d.prodKg>0?(d.techW/d.prodKg)*100:0,
@@ -11507,7 +11508,12 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
     }
   })();
 
-  // Auto-sync on login REMOVED — user must click Sync Now
+  // Auto-sync on login
+  var _origDoLoginV4 = window.doLogin;
+  window.doLogin = async function(){
+    if(typeof _origDoLoginV4==='function') await _origDoLoginV4.apply(this,arguments);
+    setTimeout(function(){ try{ if(typeof syncNowClick==='function') syncNowClick(); }catch(e){} }, 800);
+  };
   window.syncAllSheets=window.syncAllSheets||syncLiveV4;
   // Expose readTab globally so ACM and other modules can use it
   window.readTab = readTab;
@@ -11739,7 +11745,69 @@ navigate = (function(orig){
       try{ updateFilterLabel(m); }catch(e){}
     }
     try{ buildMonthChips(); }catch(e){}
-    try{ navigate(APP.currentPage); }catch(e){ if(typeof oldSelectMonth==='function') oldSelectMonth(m); }
+
+    // -- Lazy load: check if selected month data exists in APP.productionData --
+    var hasMonth = Array.isArray(APP.productionData) &&
+                   APP.productionData.some(function(r){ return r.month === m; });
+
+    if(hasMonth){
+      // Data already cached — instant render
+      try{ navigate(APP.currentPage); }catch(e){}
+    } else {
+      // Data not cached — fetch from Apps Script then render
+      if(typeof toast === 'function') toast('Loading ' + m + ' data...', 'info');
+      // Show spinner on current page
+      var page = APP.currentPage || 'dashboard';
+      var _container = document.getElementById('page-' + page) || document.getElementById('main-content');
+      if(_container){
+        var _spinner = document.createElement('div');
+        _spinner.id = 'lazy-load-spinner';
+        _spinner.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999;background:var(--bg2);padding:24px 32px;border-radius:12px;border:1px solid var(--border);text-align:center;';
+        _spinner.innerHTML = '<div style="font-size:28px;margin-bottom:8px">⏳</div><div style="color:var(--text1);font-weight:600">Loading ' + m + '...</div>';
+        document.body.appendChild(_spinner);
+      }
+
+      // Calculate fromDate for this specific month
+      var _parts = String(m).match(/^([A-Za-z]{3})-(\d{2})$/);
+      var _fromDate = '';
+      if(_parts){
+        var _mmap = {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+        var _mn = _mmap[_parts[1]];
+        var _yr = 2000 + parseInt(_parts[2], 10);
+        // Fetch from start of selected month
+        _fromDate = _yr + '-' + String(_mn).padStart(2,'0') + '-01';
+      }
+
+      // Fetch only this month's data
+      var _toDate = _fromDate; // same month
+      sseFetchDept('ALL', _fromDate).then(function(rows){
+        // Remove spinner
+        var sp = document.getElementById('lazy-load-spinner');
+        if(sp) sp.remove();
+
+        if(rows && rows.length){
+          // Merge new rows into APP.productionData (dedup)
+          var existing = APP.productionData || [];
+          APP.productionData = typeof dedupProductionData === 'function'
+            ? dedupProductionData(existing.concat(rows.map(function(r){
+                try{ return upNormalizeProductionByTab(r, r.__DEPT+'_IMPORT'); }catch(e){ return r; }
+              })))
+            : existing;
+          // Save to SDC cache
+          if(typeof sdcSave === 'function') try{ sdcSave(APP.productionData); }catch(e){}
+          if(typeof toast === 'function') toast(m + ' data loaded ✅', 'success');
+        } else {
+          if(typeof toast === 'function') toast('No data found for ' + m, 'warning');
+        }
+        // Render page
+        try{ navigate(APP.currentPage); }catch(e){}
+      }).catch(function(err){
+        var sp = document.getElementById('lazy-load-spinner');
+        if(sp) sp.remove();
+        if(typeof toast === 'function') toast('Failed to load ' + m + ': ' + err.message, 'error');
+        try{ navigate(APP.currentPage); }catch(e){}
+      });
+    }
   };
 
   // After every sync/render, rebuild chips from real data and keep current page on real data.
@@ -15741,10 +15809,25 @@ window.renderMaintenance=async function(container){
       <div class="tab" onclick="switchMaintTab('queue',this)">🎯 My Queue</div>
       <div class="tab" onclick="switchMaintTab('requests',this)">📋 All Requests</div>
       <div class="tab" onclick="switchMaintTab('report',this)">📅 Daily Report</div>
+      <button id="maint-sync-btn" onclick="window.syncMaintNow()" style="margin-left:auto;background:var(--blue);color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;cursor:pointer;font-weight:600">🔄 Sync</button>
     </div>
     <div id="maint-content" style="padding:6px 0"></div>`;
   renderMaintOverview();
   syncFromSheets().then(()=>{ updateBadge(); renderMaintOverview(); });
+  window.syncMaintNow = async function(){
+    var btn=document.getElementById('maint-sync-btn');
+    if(btn){btn.disabled=true;btn.textContent='⏳';}
+    try{
+      await syncFromSheets();
+      updateBadge();
+      var at=document.querySelector('#maint-tabs .tab.active');
+      var tn='overview';
+      if(at){var mc=at.getAttribute('onclick');if(mc){var mm=mc.match(/switchMaintTab..(\w+)/);if(mm)tn=mm[1];}}
+      if(window.switchMaintTab) window.switchMaintTab(tn,at);
+      if(typeof toast==='function') toast('Maintenance refreshed ✅','success');
+    }catch(e){if(typeof toast==='function') toast('Sync failed','error');}
+    finally{if(btn){btn.disabled=false;btn.textContent='🔄 Sync';}}
+  };
 };
 
 window.switchMaintTab=function(tab,el){
@@ -19424,6 +19507,19 @@ document.addEventListener('visibilitychange', function(){
     if(APP.currentPage === 'maintenance'){
       sofBgMaintRefresh(false);
     }
+    // Restore production data from SDC cache if wiped (screen off/on, tab suspend)
+    try{
+      if((!Array.isArray(APP.productionData) || APP.productionData.length === 0)
+         && typeof sdcLoad === 'function' && typeof sdcHasData === 'function' && sdcHasData()){
+        var cached = sdcLoad();
+        if(cached && cached.length){
+          APP.productionData = typeof dedupProductionData === 'function' ? dedupProductionData(cached) : cached;
+          console.log('[SDC] Restored ' + APP.productionData.length + ' rows after screen resume');
+          // Re-render current page
+          if(typeof navigate === 'function') try{ navigate(APP.currentPage||'dashboard'); }catch(e){}
+        }
+      }
+    }catch(e){ console.warn('[SDC] Resume restore failed:', e.message); }
   }
 });
 
