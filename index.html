@@ -17895,8 +17895,13 @@ function fgCacheAge(){
 async function fetchFGFromSheet(){
   // 1. Try APP.fgData (already loaded by syncAllSheets / fgSyncNow)
   if(Array.isArray(APP.fgData) && APP.fgData.length){
-    const normalized = APP.fgData.map(normFG).filter(r=>r.materialCode||r.totalKg>0||r.materialDesc);
-    // Save to cache so next render is instant
+    // APP.fgData has raw rows (__DEPT, __ROW, MATERIAL_CODE etc) — normalize them
+    // Check if already normalized (has totalKg field) or raw (has TOTAL_KG)
+    const firstRow = APP.fgData[0];
+    const isAlreadyNormalized = firstRow && (firstRow.totalKg !== undefined || firstRow.materialCode !== undefined);
+    const normalized = isAlreadyNormalized
+      ? APP.fgData.filter(r=>r.materialCode||r.totalKg>0||r.materialDesc)
+      : APP.fgData.map(normFG).filter(r=>r.materialCode||r.totalKg>0||r.materialDesc);
     if(normalized.length) saveFGCache(normalized);
     return normalized;
   }
