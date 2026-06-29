@@ -9844,6 +9844,27 @@ function dedupProductionData(rows){
   });
 }
 
+// Install APP.productionData setter — auto-dedup on every assignment
+(function(){
+  if(!window.APP) window.APP = {};
+  var _pd = [];
+  if(!Object.getOwnPropertyDescriptor(window.APP, 'productionData') ||
+     !Object.getOwnPropertyDescriptor(window.APP, 'productionData').set){
+    Object.defineProperty(window.APP, 'productionData', {
+      get: function(){ return _pd; },
+      set: function(rows){
+        if(!Array.isArray(rows)){ _pd = []; return; }
+        _pd = dedupProductionData(rows);
+        if(rows.length !== _pd.length){
+          console.log('[DEDUP] Auto-dedup: ' + rows.length + ' → ' + _pd.length + ' rows');
+        }
+      },
+      configurable: true
+    });
+    console.log('[DEDUP] APP.productionData auto-dedup setter installed');
+  }
+})();
+
 async function syncOneSource(key){
   const cfg=ERP_SHEET_CONFIG.SOURCES[key];
   try{
@@ -17586,11 +17607,16 @@ function _buildFcmData(r){
 function _fcmG(r){ return g(r,'notifNo')||g(r,'id')||''; }
 function _fcmPush(event, r, extra){
   try{
-    if(localStorage.getItem('up_notif_silent_v1')==='1') return;
+    var data = Object.assign(_buildFcmData(r), extra||{}, {
+      silent: window.isNotifSilent ? (window.isNotifSilent() ? 'true' : 'false') : 'false'
+    });
     if(window.fcmPush&&typeof window.fcmPush[event]==='function'){
       window.fcmPush[event](r);
     } else if(typeof window._fcmSendPush==='function'){
-      window._fcmSendPush(event, Object.assign(_buildFcmData(r),extra||{}));
+      window._fcmSendPush(event, data);
+    } else if(typeof window.upSendPush==='function'){
+      // Fallback to upSendPush (Cloudflare Worker → Apps Script → FCM v1)
+      window.upSendPush(event, data);
     }
   }catch(e){ console.warn('[FCM] '+event+': '+e.message); }
 }
@@ -21563,17 +21589,20 @@ window.toggleNotifSilent = function(){
   window.updateNotifBtn();
 };
 
-// Patch sendPush — in silent mode, pass silent:true flag so SW shows
-// notification WITHOUT sound/vibration (still visible on lock screen)
+// Ensure _fcmSendPush is always available — use upSendPush as backend
 (function(){
-  var _origSendPush = window._fcmSendPush;
-  if(typeof _origSendPush === 'function'){
+  // If _fcmSendPush not set, use upSendPush
+  if(typeof window._fcmSendPush !== 'function' && typeof window.upSendPush === 'function'){
+    window._fcmSendPush = window.upSendPush;
+  }
+  // Patch to add silent flag
+  var _orig = window._fcmSendPush || window.upSendPush;
+  if(typeof _orig === 'function'){
     window._fcmSendPush = async function(event, data){
-      // Add silent flag — SW will show notification without sound
       var payload = Object.assign({}, data, {
-        silent: window.isNotifSilent() ? 'true' : 'false'
+        silent: window.isNotifSilent ? (window.isNotifSilent() ? 'true' : 'false') : 'false'
       });
-      return _origSendPush(event, payload);
+      return _orig(event, payload);
     };
   }
 })();
