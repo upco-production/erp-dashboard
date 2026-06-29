@@ -507,7 +507,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="login-bg-overlay" id="login-bg-overlay" style="display:none"></div>
   <div class="login-box">
     <div class="login-logo">
-      <div class="login-logo-box" id="login-logo-box">UP</div>
+      <div class="login-logo-box" id="login-logo-box" style="background:transparent;padding:0;overflow:hidden">
+        <img src="https://upco-production.github.io/erp-dashboard/upco-logo.png" alt="UP" style="width:48px;height:48px;object-fit:contain" onerror="this.parentElement.textContent='UP'">
+      </div>
       <div class="login-title">
         <h1>Universal Packaging</h1>
         <p>Production Intelligence System</p>
@@ -559,7 +561,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <!-- SIDEBAR -->
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-logo" onclick="toggleSidebar()">
-      <div class="logo-box">UP</div>
+      <div class="logo-box" style="background:transparent;padding:0;overflow:hidden">
+        <img src="https://upco-production.github.io/erp-dashboard/upco-logo.png" alt="UP" style="width:36px;height:36px;object-fit:contain" onerror="this.parentElement.textContent='UP'">
+      </div>
       <div class="logo-text">
         <h2>Universal Packaging</h2>
         <p>Production ERP</p>
@@ -719,6 +723,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
             <div style="padding:8px 14px;font-size:13px;font-weight:600;color:var(--cyan);border-bottom:1px solid var(--border)" id="user-menu-fullname">-</div>
             <div onclick="window.openChangePassword()" style="padding:10px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
               🔑 Change Password
+            </div>
+            <div id="notif-enable-menu-item" onclick="window.upFCM&&window.upFCM.register();document.getElementById('user-menu-dropdown').style.display='none';" style="padding:10px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
+              🔔 Enable Notifications
             </div>
             <div onclick="window.doLogout()" style="padding:10px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--red);transition:background .15s;border-top:1px solid var(--border)" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
               🚪 Logout
@@ -17430,38 +17437,127 @@ window.downloadMaintPDF=function(){
     <td>${g(r,'partsUsed')||'-'}</td>
     <td>${g(r,'followUp')||'-'}</td>
   </tr>`).join('');
+  // Split requests by type
+  const meReqs = reqs.filter(r=>['ME','MECHANICAL','PM'].includes(String(g(r,'type')||'').toUpperCase()));
+  const eeReqs = reqs.filter(r=>['EE','ELECTRICAL'].includes(String(g(r,'type')||'').toUpperCase()));
+  const utReqs = reqs.filter(r=>['UT','UTILITIES','UTILITY'].includes(String(g(r,'type')||'').toUpperCase()));
+
+  function buildMaintTable(list){
+    if(!list.length) return '<tr><td colspan="18" style="text-align:center;color:#999;padding:10px">No requests</td></tr>';
+    return list.map(r=>{
+      const pri=g(r,'priority')||'';
+      const sta=g(r,'status')||'';
+      const priC=pri==='CRITICAL'?'#dc2626':pri==='HIGH'?'#ea580c':pri==='MEDIUM'?'#d97706':'#16a34a';
+      const staC=['CONFIRMED','LOCKED'].includes(sta)?'#16a34a':['REJECTED'].includes(sta)?'#dc2626':'#2563eb';
+      const dtStr=g(r,'requestDate')||g(r,'submittedAt')||'';
+      let dtFmt='-';try{const dd=new Date(dtStr);if(!isNaN(dd)){const mo=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];dtFmt=String(dd.getDate()).padStart(2,'0')+'-'+mo[dd.getMonth()]+'-'+dd.getFullYear();}}catch(e){}
+      return `<tr>
+        <td style='font-weight:700;color:#1e3a5f'>${g(r,'notifNo')||g(r,'id')||'-'}</td>
+        <td>${dtFmt}</td>
+        <td>${g(r,'requestTime')||'-'}</td>
+        <td>${g(r,'dept')||'-'}</td>
+        <td>${g(r,'machine')||'-'}</td>
+        <td><b style='color:${priC}'>${pri||'-'}</b></td>
+        <td><b style='color:${staC}'>${sta||'-'}</b></td>
+        <td style='max-width:160px'>${g(r,'description')||'-'}</td>
+        <td>${g(r,'requestedBy')||g(r,'submittedByUser')||'-'}</td>
+        <td>${g(r,'shift')||'-'}</td>
+        <td>${g(r,'arrivalTime')||'-'}</td>
+        <td>${g(r,'closingTime')||'-'}</td>
+        <td style='text-align:center'>${g(r,'downtimeMin')||'0'}</td>
+        <td style='text-align:center'>${g(r,'wasteKg')||'0'}</td>
+        <td style='max-width:140px'>${g(r,'actionTaken')||'-'}</td>
+        <td style='max-width:140px'>${g(r,'rootCause')||'-'}</td>
+        <td style='max-width:140px'>${g(r,'preventiveAction')||'-'}</td>
+        <td>${g(r,'partsUsed')||'-'}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  const TH_ROW='<th>Notif No</th><th>Date</th><th>Time</th><th>Dept</th><th>Machine</th><th>Priority</th><th>Status</th><th>Description</th><th>Req By</th><th>Shift</th><th>Arrival</th><th>Closing</th><th>DT(min)</th><th>Waste KG</th><th>Action Taken</th><th>Root Cause</th><th>Preventive Action</th><th>Parts</th>';
+
   const win=window.open('','_blank');
   win.document.write(`<!DOCTYPE html><html><head>
   <title>Maintenance Report - ${ds}</title>
+  <meta charset='UTF-8'>
   <style>
-    body{font-family:Arial,sans-serif;font-size:8.5px;padding:16px;color:#111}
-    h2{margin:0 0 2px;font-size:13px}
-    .meta{color:#555;font-size:8px;margin-bottom:8px}
-    .kpis{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap}
-    .kpi{background:#f0f0f0;border-radius:4px;padding:6px 12px;text-align:center;min-width:90px}
-    .kpi .v{font-size:15px;font-weight:700}.kpi .l{font-size:7px;color:#666}
-    table{width:100%;border-collapse:collapse;font-size:7.5px}
-    th{background:#1a1a2e;color:#fff;padding:3px 4px;text-align:left;white-space:nowrap}
-    td{border-bottom:1px solid #ddd;padding:3px 4px;vertical-align:top}
-    tr:nth-child(even) td{background:#f9f9f9}
-    @media print{body{padding:0}button{display:none}}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',Arial,sans-serif;font-size:8px;color:#1a1a2e;background:#fff;padding:16px}
+    .rpt-header{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #cc0000;padding-bottom:10px;margin-bottom:12px}
+    .rpt-left{display:flex;align-items:center;gap:12px}
+    .rpt-left img{width:50px;height:50px;object-fit:contain}
+    .rpt-title h1{font-size:15px;font-weight:800;color:#1e3a5f}
+    .rpt-title p{font-size:9px;color:#666;margin-top:2px}
+    .rpt-right{text-align:right;font-size:8px;color:#555;line-height:1.7}
+    .rpt-right b{color:#1e3a5f}
+    .kpis{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+    .kpi{background:linear-gradient(135deg,#1e3a5f,#2563eb);color:#fff;border-radius:8px;padding:7px 12px;text-align:center;flex:1;min-width:80px}
+    .kpi.red{background:linear-gradient(135deg,#7f1d1d,#dc2626)}
+    .kpi.green{background:linear-gradient(135deg,#14532d,#16a34a)}
+    .kpi.orange{background:linear-gradient(135deg,#7c2d12,#ea580c)}
+    .kpi.teal{background:linear-gradient(135deg,#134e4a,#0d9488)}
+    .kpi .v{font-size:17px;font-weight:800;line-height:1}
+    .kpi .l{font-size:7px;opacity:.85;margin-top:3px}
+    .sec-hdr{display:flex;align-items:center;gap:8px;margin:14px 0 6px;padding:6px 10px;border-radius:6px}
+    .sec-hdr.me{background:#eff6ff;border-left:4px solid #2563eb}
+    .sec-hdr.ee{background:#fffbeb;border-left:4px solid #f59e0b}
+    .sec-hdr.ut{background:#ecfdf5;border-left:4px solid #10b981}
+    .sec-hdr h3{font-size:10px;font-weight:700;color:#1e3a5f;flex:1}
+    .sec-hdr .cnt{background:#e5e7eb;color:#374151;border-radius:10px;padding:1px 8px;font-size:8px;font-weight:600}
+    table{width:100%;border-collapse:collapse;margin-bottom:4px}
+    thead tr{background:#1e3a5f}
+    th{color:#fff;padding:4px 5px;text-align:left;font-size:7.5px;white-space:nowrap;font-weight:600}
+    td{border-bottom:1px solid #e5e7eb;padding:4px 5px;vertical-align:top;font-size:7.5px}
+    tr:nth-child(even) td{background:#f8fafc}
+    .divider{border:none;border-top:1px dashed #cbd5e1;margin:10px 0}
+    .rpt-footer{border-top:2px solid #cc0000;margin-top:14px;padding-top:8px;display:flex;justify-content:space-between;font-size:7.5px;color:#888}
+    @media print{body{padding:8px}button{display:none}.no-print{display:none}}
   </style></head><body>
-  <h2>Universal Packaging - Maintenance Daily Report</h2>
-  <div class="meta">Date: <b>${ds}</b> &nbsp;|&nbsp; Generated: ${fmt(new Date().toISOString())} &nbsp;|&nbsp; By: ${curName()||'-'}</div>
-  <div class="kpis">
-    <div class="kpi"><div class="v">${reqs.length}</div><div class="l">Total Requests</div></div>
-    <div class="kpi"><div class="v">${reqs.filter(r=>g(r,'priority')==='CRITICAL').length}</div><div class="l">Critical</div></div>
-    <div class="kpi"><div class="v">${totalDT} min</div><div class="l">Total Downtime</div></div>
-    <div class="kpi"><div class="v">${totalW.toFixed(1)} KG</div><div class="l">Total Waste</div></div>
-    <div class="kpi"><div class="v">${reqs.filter(r=>['CONFIRMED','LOCKED'].includes(g(r,'status'))).length}</div><div class="l">Completed</div></div>
-    <div class="kpi"><div class="v">${reqs.filter(r=>['OPEN','ACCEPTED','IN_PROGRESS'].includes(g(r,'status'))).length}</div><div class="l">Pending</div></div>
+
+  <div class='rpt-header'>
+    <div class='rpt-left'>
+      <img src='https://upco-production.github.io/erp-dashboard/upco-logo.png' alt='UP' onerror='this.style.display=\'none\''>
+      <div class='rpt-title'>
+        <h1>Universal Packaging Pvt. Ltd.</h1>
+        <p>Maintenance Daily Report &nbsp;|&nbsp; Production ERP</p>
+      </div>
+    </div>
+    <div class='rpt-right'>
+      <div>Date: <b>${ds}</b></div>
+      <div>Generated: <b>${fmt(new Date().toISOString())}</b></div>
+      <div>Prepared By: <b>${curName()||'-'}</b></div>
+    </div>
   </div>
-  <table><thead><tr>
-    <th>Notif No</th><th>Date</th><th>Time</th><th>Type</th><th>Dept</th><th>Machine</th>
-    <th>Priority</th><th>Status</th><th>Description</th><th>Req By</th><th>Shift</th>
-    <th>Incharge</th><th>Arrival</th><th>Closing</th><th>DT(min)</th><th>Waste KG</th>
-    <th>Action Taken</th><th>Root Cause</th><th>Preventive Action</th><th>Parts</th><th>F/U</th>
-  </tr></thead><tbody>${rows||'<tr><td colspan="21">No requests on this date</td></tr>'}</tbody></table>
+
+  <div class='kpis'>
+    <div class='kpi'><div class='v'>${reqs.length}</div><div class='l'>Total Requests</div></div>
+    <div class='kpi red'><div class='v'>${reqs.filter(r=>g(r,'priority')==='CRITICAL').length}</div><div class='l'>Critical</div></div>
+    <div class='kpi'><div class='v'>${meReqs.length}</div><div class='l'>Mechanical</div></div>
+    <div class='kpi orange'><div class='v'>${eeReqs.length}</div><div class='l'>Electrical</div></div>
+    <div class='kpi teal'><div class='v'>${utReqs.length}</div><div class='l'>Utilities</div></div>
+    <div class='kpi green'><div class='v'>${reqs.filter(r=>['CONFIRMED','LOCKED'].includes(g(r,'status'))).length}</div><div class='l'>Completed</div></div>
+    <div class='kpi red'><div class='v'>${reqs.filter(r=>['OPEN','ACCEPTED','IN_PROGRESS'].includes(g(r,'status'))).length}</div><div class='l'>Pending</div></div>
+    <div class='kpi orange'><div class='v'>${totalDT}</div><div class='l'>Total DT (min)</div></div>
+  </div>
+
+  <div class='sec-hdr me'><h3>&#9881; MECHANICAL / PM REQUESTS</h3><span class='cnt'>${meReqs.length} requests</span></div>
+  <table><thead><tr>${TH_ROW}</tr></thead><tbody>${buildMaintTable(meReqs)}</tbody></table>
+  <hr class='divider'>
+
+  <div class='sec-hdr ee'><h3>&#9889; ELECTRICAL REQUESTS</h3><span class='cnt'>${eeReqs.length} requests</span></div>
+  <table><thead><tr>${TH_ROW}</tr></thead><tbody>${buildMaintTable(eeReqs)}</tbody></table>
+  <hr class='divider'>
+
+  <div class='sec-hdr ut'><h3>&#128295; UTILITIES REQUESTS</h3><span class='cnt'>${utReqs.length} requests</span></div>
+  <table><thead><tr>${TH_ROW}</tr></thead><tbody>${buildMaintTable(utReqs)}</tbody></table>
+
+  <div class='rpt-footer'>
+    <span>Universal Packaging Pvt. Ltd. &nbsp;|&nbsp; Maintenance Management System &nbsp;|&nbsp; Confidential</span>
+    <span>Generated: ${new Date().toLocaleDateString('en-PK',{day:'2-digit',month:'short',year:'numeric'})}</span>
+  </div>
+  <div class='no-print' style='text-align:center;margin-top:14px'>
+    <button onclick='window.print()' style='background:#1e3a5f;color:#fff;border:none;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600'>&#128424; Print / Save PDF</button>
+  </div>
   <script>window.onload=function(){window.print();}<\/script>
   </body></html>`);
   win.document.close();
