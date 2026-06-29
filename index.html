@@ -17899,9 +17899,19 @@ async function fetchFGFromSheet(){
     // Check if already normalized (has totalKg field) or raw (has TOTAL_KG)
     const firstRow = APP.fgData[0];
     const isAlreadyNormalized = firstRow && (firstRow.totalKg !== undefined || firstRow.materialCode !== undefined);
-    const normalized = isAlreadyNormalized
-      ? APP.fgData.filter(r=>r.materialCode||r.totalKg>0||r.materialDesc)
-      : APP.fgData.map(normFG).filter(r=>r.materialCode||r.totalKg>0||r.materialDesc);
+    let normalized;
+    if(isAlreadyNormalized){
+      // Recalculate pcsMtrValue based on baseUnit (PC/M → show, KG → null)
+      normalized = APP.fgData
+        .filter(r=>r.materialCode||r.totalKg>0||r.materialDesc)
+        .map(r=>{
+          const bu = String(r.baseUnit||'').toUpperCase().trim();
+          const isPcOrM = bu==='PC'||bu==='PCS'||bu==='M'||bu==='MTR'||bu==='METER';
+          return Object.assign({}, r, { pcsMtrValue: isPcOrM ? ((r.unrestStock||0)+(r.qualStock||0)) : null });
+        });
+    } else {
+      normalized = APP.fgData.map(normFG).filter(r=>r.materialCode||r.totalKg>0||r.materialDesc);
+    }
     if(normalized.length) saveFGCache(normalized);
     return normalized;
   }
