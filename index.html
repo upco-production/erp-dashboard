@@ -403,7 +403,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
   /* Charts: single column */
   .charts-grid{grid-template-columns:1fr;gap:10px;margin-bottom:14px}
   .chart-card{padding:12px}
-  .chart-wrap{height:160px}
+  .chart-wrap{height:180px}
+  .chart-title{font-size:13px}
+  .chart-subtitle{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
   /* Date filter: compact on mobile */
   .date-filter-wrap{flex:0 0 auto}
@@ -416,7 +418,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
 
   /* Tables: horizontal scroll */
   .table-card{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  table{min-width:600px}
+  .table-card table{min-width:600px}
+  /* WIP specific */
+  .wip-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px}
 
   /* Stats row: wrap */
   .stats-row{flex-wrap:wrap;gap:8px}
@@ -444,8 +448,16 @@ tr:hover td{background:rgba(255,255,255,.02)}
   .login-logo{margin-bottom:24px}
 
   /* Tabs: scroll horizontally */
-  .tabs{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
+  .tabs{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
   .tab{white-space:nowrap;flex-shrink:0}
+  /* Dashboard tabs */
+  .dash-tabs{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
+  .dash-tab{white-space:nowrap;flex-shrink:0}
+  /* KPI target font size */
+  .kpi-target{font-size:10px}
+  /* KPI badge */
+  .kpi-badge{font-size:9px;padding:2px 5px}
 
   /* Filter bar */
   .filter-bar{flex-wrap:wrap;gap:6px;padding:10px}
@@ -467,14 +479,24 @@ tr:hover td{background:rgba(255,255,255,.02)}
   .kpi-card{padding:8px}
   .kpi-value{font-size:20px}
   .kpi-label{font-size:10px}
-  .kpi-target{display:none}
+  .kpi-target{font-size:9px}
   .page-title{font-size:13px;max-width:100px}
   .charts-grid{gap:8px}
-  .chart-wrap{height:140px}
+  .chart-wrap{height:150px}
   .stat-box{min-width:100%}
   .settings-tab{padding:5px 8px !important;font-size:10px !important}
   .content{padding:8px}
   .form-grid-4{grid-template-columns:repeat(2,1fr) !important}
+  .chart-card{padding:10px}
+  .chart-title{font-size:12px}
+  .chart-subtitle{font-size:10px}
+}
+
+/* Extra small: 360px and below */
+@media(max-width:360px){
+  .kpi-grid{grid-template-columns:1fr;gap:6px}
+  .kpi-value{font-size:22px}
+  .chart-wrap{height:130px}
 }
 
 /* LIVE SHEET DEBUG LOG */
@@ -15846,14 +15868,14 @@ window.renderMaintenance=async function(container){
     var btn=document.getElementById('maint-sync-btn');
     if(btn){btn.disabled=true;btn.textContent='⏳';}
     try{
-      await syncFromSheets();
-      updateBadge();
+      if(typeof syncFromSheets==='function') await syncFromSheets();
+      if(typeof updateBadge==='function') updateBadge();
       var at=document.querySelector('#maint-tabs .tab.active');
       var tn='overview';
-      if(at){var mc=at.getAttribute('onclick');if(mc){var mm=mc.match(/switchMaintTab..(\w+)/);if(mm)tn=mm[1];}}
+      if(at){var mc=at.getAttribute('onclick');if(mc){var mm=mc.match(/switchMaintTab\('(\w+)'/);if(mm)tn=mm[1];}}
       if(window.switchMaintTab) window.switchMaintTab(tn,at);
       if(typeof toast==='function') toast('Maintenance refreshed ✅','success');
-    }catch(e){if(typeof toast==='function') toast('Sync failed','error');}
+    }catch(e){if(typeof toast==='function') toast('Sync failed: '+e.message,'error');}
     finally{if(btn){btn.disabled=false;btn.textContent='🔄 Sync';}}
   };
 };
@@ -16374,18 +16396,16 @@ function renderMaintQueue(){
         <th>Type</th><th>Priority</th><th>Status</th><th>Description</th><th>Actions</th>
       </tr></thead>
       <tbody>
-        ${mine.map(r=>`<tr>
-          <td style="font-family:monospace;color:var(--cyan);white-space:nowrap">${g(r,'notifNo')||g(r,'id')}</td>
-          <td>${g(r,'requestDate')||String(g(r,'submittedAt')).slice(0,10)}</td>
-          <td style="white-space:nowrap">${(()=>{const _t=g(r,'requestTime')||'';if(!_t||_t==='-') return '-';if(/AM|PM/i.test(_t)) return _t;try{const _dt=new Date('2000-01-01T'+_t);return isNaN(_dt)?_t:fmtTime(_dt);}catch(e){return _t;}})()}</td>
+        ${mine.map(r=>`<tr style="cursor:pointer" onclick="window.openMaintDetail('${g(r,'id')}')">
+          <td style="font-family:monospace;color:var(--cyan);white-space:nowrap;font-weight:600">${g(r,'notifNo')||g(r,'id')}</td>
+          <td style="white-space:nowrap">${(()=>{const _rd=g(r,'requestDate')||g(r,'submittedAt')||'';try{const _d=new Date(_rd);return isNaN(_d)?_rd:String(_d.getDate()).padStart(2,'0')+'-'+['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][_d.getMonth()]+'-'+_d.getFullYear();}catch(e){return _rd||'-';}})()}</td>
           <td>${g(r,'dept')||'-'}</td>
           <td style="white-space:nowrap">${g(r,'machine')||'-'}</td>
           <td>${g(r,'type')||'-'}</td>
           <td>${pBadge(g(r,'priority'))}</td>
           <td>${sBadge(g(r,'status'))}</td>
           <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g(r,'description')||'-'}</td>
-          <td style="white-space:nowrap">
-            <button class="btn btn-outline btn-sm" onclick="window.openMaintDetail('${g(r,'id')}')">View</button>
+          <td style="white-space:nowrap" onclick="event.stopPropagation()">
             ${_actionBtn(r)}
           </td>
         </tr>`).join('')}
@@ -16518,9 +16538,17 @@ function _buildRows(reqs){
 // -------------------------------------------------------------------------
 // DETAIL MODAL (read-only + stage progress bar + audit log)
 // -------------------------------------------------------------------------
-window.openMaintDetail=function(id){
-  const r=(APP.maintenanceRequests||[]).find(x=>g(x,'id')===id);
-  if(!r){ toast('Request not found','error'); return; }
+window.openMaintDetail=async function(id){
+  let r=(APP.maintenanceRequests||[]).find(x=>g(x,'id')===id);
+  if(!r){
+    // Data not loaded yet — sync first then try again
+    if(typeof toast==='function') toast('Loading request...','info');
+    try{
+      if(typeof syncFromSheets==='function') await syncFromSheets();
+      r=(APP.maintenanceRequests||[]).find(x=>g(x,'id')===id);
+    }catch(e){}
+  }
+  if(!r){ toast('Request not found: '+id,'error'); return; }
   const progress=(APP.maintenanceProgress||[]).filter(p=>p['REQUEST_ID']===id);
   const dt=diffMin(g(r,'arrivalTime'),g(r,'closingTime'));
 
@@ -16533,7 +16561,7 @@ window.openMaintDetail=function(id){
             <div style="font-size:22px;font-weight:700;color:var(--cyan);font-family:monospace">${g(r,'notifNo')||g(r,'id')}</div>
             <div style="font-size:11px;color:var(--text3);margin-top:2px">${g(r,'dept')} · ${g(r,'machine')||'-'} · ${g(r,'type')} · ${g(r,'requestDate')||''} ${g(r,'requestTime')||''}</div>
           </div>
-          <button onclick="this.closest('[onclick]').remove()" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:24px;line-height:1">×</button>
+          <button onclick="this.closest('[style*=position]').remove()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;width:32px;height:32px;display:flex;align-items:center;justify-content:center" title="Close">×</button>
         </div>
 
         <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">${pBadge(g(r,'priority'))} ${sBadge(g(r,'status'))}</div>
@@ -16612,9 +16640,12 @@ window.openMaintDetail=function(id){
         </div>`:''}
 
         <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${canAcceptMaint()&&g(r,'status')==='OPEN'?`
+            <button class="btn btn-primary btn-sm" onclick="this.closest('[style*=position]').remove();window.acceptMaintRequest('${id}')">✅ Accept</button>
+            <button class="btn btn-danger btn-sm" onclick="this.closest('[style*=position]').remove();window.openRejectModal('${id}')">❌ Reject</button>`:''}
           ${g(r,'status')!=='LOCKED'&&(isAdmin()||(isTech()&&g(r,'type')===roleToTypeCode(curRole()))||canStage3(r)||canStage5(r))?
-            `<button class="btn btn-primary btn-sm" onclick="this.closest('[onclick]').remove();window.openMaintStage('${id}')">✏ Update</button>`:''}
-          <button class="btn btn-outline btn-sm" onclick="this.closest('[onclick]').remove()">Close</button>
+            `<button class="btn btn-primary btn-sm" onclick="this.closest('[style*=position]').remove();window.openMaintStage('${id}')">✏ Update</button>`:''}
+          <button class="btn btn-outline btn-sm" onclick="this.closest('[style*=position]').remove()">✕ Close</button>
         </div>
       </div>
     </div>`;
@@ -18542,7 +18573,7 @@ window.showFGJobDetail = function(sfgKey, customer){
             <h3 style="font-family:'Rajdhani',sans-serif;margin:4px 0 2px;font-size:18px">${rows[0].jobName||sfgKey}</h3>
             <div style="font-size:11px;color:var(--text3)">${customer} · SFG: ${rows[0].sfgCode||'-'}</div>
           </div>
-          <button onclick="this.closest('[onclick]').remove()"
+          <button onclick="this.closest('[style*=position]').remove()"
                   style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:24px;line-height:1">×</button>
         </div>
 
@@ -18598,7 +18629,7 @@ window.showFGJobDetail = function(sfgKey, customer){
           </table>
         </div>
         <div style="margin-top:14px;display:flex;gap:8px">
-          <button class="btn btn-outline btn-sm" onclick="this.closest('[onclick]').remove()">Close</button>
+          <button class="btn btn-outline btn-sm" onclick="this.closest('[style*=position]').remove()">Close</button>
         </div>
       </div>
     </div>`;
@@ -22160,21 +22191,19 @@ setTimeout(function(){
         var msg = event.data || {};
         if(msg.type === 'OPEN_MAINT_REQUEST'){
           console.log('[FCM] SW message: open maint', msg);
-          // Navigate to maintenance tab
           if(typeof navigate === 'function'){
             navigate('maintenance');
-            // If specific request, open its detail after short delay
-            if(msg.reqId){
-              setTimeout(function(){
-                try{
-                  if(typeof window.openMaintDetail === 'function'){
-                    window.openMaintDetail(msg.reqId);
-                  } else if(msg.tab === 'queue' && typeof renderMaintQueue === 'function'){
-                    renderMaintQueue();
-                  }
-                }catch(e){}
-              }, 500);
-            }
+            // Sync first, then open detail
+            setTimeout(async function(){
+              try{
+                if(typeof syncFromSheets==='function') await syncFromSheets();
+                if(msg.reqId && typeof window.openMaintDetail==='function'){
+                  window.openMaintDetail(msg.reqId);
+                } else if(msg.tab==='queue' && typeof renderMaintQueue==='function'){
+                  renderMaintQueue();
+                }
+              }catch(e){ console.warn('[FCM] Open detail failed:',e.message); }
+            }, 800);
           }
         }
       });
