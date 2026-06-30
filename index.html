@@ -15888,6 +15888,7 @@ window.renderMaintenance=async function(container){
 window.switchMaintTab=function(tab,el){
   document.querySelectorAll('#maint-tabs .tab').forEach(t=>t.classList.remove('active'));
   if(el) el.classList.add('active');
+  if(tab==='queue'){ renderMaintQueue(true); return; } // reset filter on fresh tab open
   const H={overview:renderMaintOverview,submit:renderMaintSubmit,queue:renderMaintQueue,requests:renderMaintRequests,report:renderMaintReport};
   if(H[tab]) H[tab]();
 };
@@ -16351,8 +16352,9 @@ window.submitMaintRequest=async function(){
 // -------------------------------------------------------------------------
 // TAB 3 - MY QUEUE
 // -------------------------------------------------------------------------
-function renderMaintQueue(){
+function renderMaintQueue(_resetFilter){
   const c=document.getElementById('maint-content'); if(!c) return;
+  if(_resetFilter) window._maintQueueStatusFilter='ALL';
   const all=APP.maintenanceRequests||[];
   const role=curRole();
   let mine=[], heading='', hint='';
@@ -19554,7 +19556,7 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
 
 // -- Config -----------------------------------------------------------------
 const SOF_META_KEY     = 'sof_meta_v1';      // {maintLastFetch, prodLastFetch}
-const SOF_MAINT_STALE  = 30 * 60 * 1000;     // 30 min - maint background refresh
+const SOF_MAINT_STALE  = 90 * 1000;          // 90 sec - maint background refresh (was 30min, too slow)
 const SOF_BG_DELAY     = 4000;               // 4s after login before bg refresh
 
 // -- Meta helpers ------------------------------------------------------------
@@ -19715,6 +19717,13 @@ if(typeof _sofOrigNavigate === 'function'){
     setTimeout(sofUpdateAgo, 200);
   };
 }
+
+// -- Poll maintenance page every 90s while it's open --------------------------
+setInterval(function(){
+  if(typeof APP!=="undefined" && APP && APP.currentUser && APP.currentPage === 'maintenance' && !document.hidden){
+    sofBgMaintRefresh(false);
+  }
+}, SOF_MAINT_STALE);
 
 // -- Visibility change - resume bg jobs when tab becomes visible -------------
 document.addEventListener('visibilitychange', function(){
