@@ -716,7 +716,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <div class="conn-debug ok" id="conn-debug" onclick="showConnectionStatus()" title="Connection Status">
           <span id="conn-icon">●</span><span id="conn-text">Connected</span>
         </div>
-        <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+        <div class="live-badge" id="live-badge" style="display:none"><div class="live-dot"></div>LIVE</div>
         <div id="last-sync-indicator" style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.2;font-size:10px;color:var(--text3);margin-right:4px;cursor:pointer" onclick="navigate('cache')" title="Click to open Cache tab">
           <span style="text-transform:uppercase;letter-spacing:.04em">Last Sync</span>
           <span id="last-sync-value" style="color:var(--text2);font-weight:600">-</span>
@@ -11114,6 +11114,9 @@ window.sseRunSync = async function(dept, fromDate){
     toast('Synced: ' + dept,'success');
     refreshCurrentPageAfterSync(APP.currentPage||'dashboard');
     if(btn){ btn.textContent='✅ Synced!'; }
+    // Show LIVE badge only after data has actually synced
+    var liveBadge = document.getElementById('live-badge');
+    if(liveBadge) liveBadge.style.display = 'flex';
   }catch(e){
     debugLog('err','SSE sync failed',e.message);
     toast('Sync failed: '+e.message,'error');
@@ -11135,6 +11138,8 @@ async function syncNowClick(){
       sseMarkFirstRunDone();
       debugLog('ok','SSE first run complete','All sheets synced');
       if(btn){ btn.textContent='✅ Synced!'; }
+      var liveBadge = document.getElementById('live-badge');
+      if(liveBadge) liveBadge.style.display = 'flex';
     }catch(e){
       debugLog('err','SSE first run failed',e.message);
       if(btn){ btn.textContent='❌ Failed'; }
@@ -20917,6 +20922,11 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
 
           console.log('[Session] Auto-restored:', matched.username, '→', lastPage);
 
+          // Trigger auto-sync after restore (same as fresh login)
+          setTimeout(function(){
+            try{ if(typeof syncNowClick==='function') syncNowClick(); }catch(e){}
+          }, 1000);
+
         } else if(attemptsLeft > 0 && users.length === 0){
           // Users not loaded yet from cache - retry
           setTimeout(function(){ attemptRestore(attemptsLeft - 1); }, 300);
@@ -20928,7 +20938,7 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
       }
 
       // Start attempt - users may already be in APP from upcLoad()
-      attemptRestore(10);
+      attemptRestore(20); // 20 × 300ms = 6 seconds — handles PWA cold-start
 
     }catch(e){
       console.warn('[Session] Restore failed:', e.message);
