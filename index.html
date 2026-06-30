@@ -15292,11 +15292,13 @@ function getMaintSheetId(){
 }
 const TAB_REQ  = 'MAINTENANCE_REQUESTS';
 const TAB_PROG = 'MAINTENANCE_PROGRESS';
+const TAB_PM_SCHED = 'PM_SCHEDULE';
 
 // -- Cache -----------------------------------------------------------------
-const MR_KEY='up_maint_req_v2', MP_KEY='up_maint_prog_v2';
+const MR_KEY='up_maint_req_v2', MP_KEY='up_maint_prog_v2', PMS_KEY='up_pm_sched_v1';
 if(typeof APP!=='undefined'&&APP&&!APP.maintenanceRequests) APP.maintenanceRequests=_lsGet(MR_KEY);
 if(typeof APP!=='undefined'&&APP&&!APP.maintenanceProgress) APP.maintenanceProgress=_lsGet(MP_KEY);
+if(typeof APP!=='undefined'&&APP&&!APP.pmSchedule) APP.pmSchedule=_lsGet(PMS_KEY);
 function _lsGet(k){ try{const d=localStorage.getItem(k);return d?JSON.parse(d):[];}catch(e){return [];} }
 function _lsSet(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch(e){} }
 function cacheReqs(){ _lsSet(MR_KEY,APP.maintenanceRequests||[]); }
@@ -15697,6 +15699,14 @@ const MACHINES_BY_DEPT={
   'Slitting':  ['SM-01','SM-02','SM-03','SM-04'],
   'Bag Making':['BOX POUCH','CENTER SEAL','OLD STD.POUCH','NEW STD.POUCH','DIAPER']
 };
+// Case-insensitive lookup — handles dept value mismatches (e.g. "printing" vs "Printing")
+function getMachinesForDept(dept){
+  const target = String(dept||'').trim().toLowerCase();
+  for(const key in MACHINES_BY_DEPT){
+    if(key.toLowerCase() === target) return MACHINES_BY_DEPT[key];
+  }
+  return [];
+}
 
 function pBadge(p){ const c=PC[p]||'var(--text3)';return `<span class="badge" style="background:${c};color:#fff;font-size:9px;padding:2px 7px;border-radius:10px">${p||'?'}</span>`; }
 function sBadge(s){ const c=SC[s]||'var(--text3)';return `<span class="badge" style="background:${c};color:#fff;font-size:9px;padding:2px 7px;border-radius:10px">${(s||'?').replace(/_/g,' ')}</span>`; }
@@ -15784,7 +15794,7 @@ window._updateMachineList = function(){
   const dept = document.getElementById('mr-dept')?.value||'';
   const sel  = document.getElementById('mr-machine');
   if(!sel) return;
-  const machines = MACHINES_BY_DEPT[dept]||[];
+  const machines = getMachinesForDept(dept);
   sel.innerHTML = '<option value="">- Select machine -</option>'
     + machines.map(m=>`<option value="${m}">${m}</option>`).join('')
     + '<option value="OTHER">Other / Custom…</option>';
@@ -15857,12 +15867,14 @@ window.renderMaintenance=async function(container){
   }
   const showSubmit=canSubmit();
   const showQueue=true; // everyone can see their queue (may be empty)
+  const showPMSched = isAdmin() || isTechnicalTeam(); // Technical team creates PM schedules
   container.innerHTML=`
     <div class="tabs" id="maint-tabs">
       <div class="tab active" onclick="switchMaintTab('overview',this)">📊 Overview</div>
       ${showSubmit?'<div class="tab" onclick="switchMaintTab(\'submit\',this)">📝 Submit Request</div>':''}
       <div class="tab" onclick="switchMaintTab('queue',this)">🎯 My Queue</div>
       <div class="tab" onclick="switchMaintTab('requests',this)">📋 All Requests</div>
+      ${showPMSched?'<div class="tab" onclick="switchMaintTab(\'pmsched\',this)">🛠 PM Schedule</div>':''}
       <div class="tab" onclick="switchMaintTab('report',this)">📅 Daily Report</div>
       <button id="maint-sync-btn" onclick="window.syncMaintNow()" style="margin-left:auto;background:var(--blue);color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;cursor:pointer;font-weight:600">🔄 Sync</button>
     </div>
@@ -15889,7 +15901,7 @@ window.switchMaintTab=function(tab,el){
   document.querySelectorAll('#maint-tabs .tab').forEach(t=>t.classList.remove('active'));
   if(el) el.classList.add('active');
   if(tab==='queue'){ renderMaintQueue(true); return; } // reset filter on fresh tab open
-  const H={overview:renderMaintOverview,submit:renderMaintSubmit,queue:renderMaintQueue,requests:renderMaintRequests,report:renderMaintReport};
+  const H={overview:renderMaintOverview,submit:renderMaintSubmit,queue:renderMaintQueue,requests:renderMaintRequests,report:renderMaintReport,pmsched:renderPMSchedule};
   if(H[tab]) H[tab]();
 };
 
@@ -16075,7 +16087,7 @@ function renderMaintSubmit(){
         _depts.map(d=>'<option value="'+d+'"'+(_uDept===d?' selected':'')+'>'+d+'</option>').join('');
 
   // Machine options - pre-load from user's dept (empty placeholder if no dept match)
-  const _mList=MACHINES_BY_DEPT[_uDept]||[];
+  const _mList=getMachinesForDept(_uDept);
   const _machOpts=(_mList.length
     ? _mList.map(m=>'<option value="'+m+'">'+m+'</option>').join('')
     : '<option value="">- Select dept first -</option>')
@@ -16333,9 +16345,14 @@ window.submitMaintRequest=async function(){
     }
     if(typeof window.sendBrowserNotif==='function')
       window.sendBrowserNotif('🔧 New Request ['+priority+']',dept+' / '+type+': '+desc.substring(0,60),'mr-'+id);
-    const tabs=document.querySelectorAll('#maint-tabs .tab');
-    const allTab=Array.from(tabs).find(t=>t.textContent.includes('All'));
-    if(allTab) allTab.click(); else renderMaintRequests();
+    // Switch to "All Requests" tab reliably
+    if(typeof window.switchMaintTab === 'function'){
+      const allTabEl = Array.from(document.querySelectorAll('#maint-tabs .tab'))
+        .find(t => (t.getAttribute('onclick')||'').includes("switchMaintTab('requests'"));
+      window.switchMaintTab('requests', allTabEl);
+    } else {
+      renderMaintRequests();
+    }
   }catch(e){
     // Save locally so data isn't lost
     APP.maintenanceRequests.push(row); cacheReqs(); updateBadge();
@@ -17263,6 +17280,214 @@ window.deleteMaint=async function(id){
 // -------------------------------------------------------------------------
 // TAB 5 - REPORT (Date Range + Department filter + Presets)
 // -------------------------------------------------------------------------
+// -------------------------------------------------------------------------
+// PM SCHEDULE — Technical team schedules preventive maintenance
+// -------------------------------------------------------------------------
+function renderPMSchedule(){
+  const c=document.getElementById('maint-content'); if(!c) return;
+  const sched = (APP.pmSchedule||[]).slice().sort((a,b)=>new Date(a.SCHEDULED_DATE||0)-new Date(b.SCHEDULED_DATE||0));
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  function statusOf(s){
+    if(s.STATUS==='COMPLETED') return 'COMPLETED';
+    if(s.STATUS==='ACCEPTED') return 'ACCEPTED';
+    const d = new Date(s.SCHEDULED_DATE);
+    if(isNaN(d)) return 'PENDING';
+    d.setHours(0,0,0,0);
+    if(d < today) return 'OVERDUE';
+    return 'PENDING';
+  }
+  function statusColor(st){
+    return {OVERDUE:'#dc2626',PENDING:'#2563eb',ACCEPTED:'#16a34a',COMPLETED:'#6b7280'}[st]||'#6b7280';
+  }
+
+  c.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-size:16px;font-weight:600;color:var(--cyan)">🛠 PM Schedule</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:3px">Technical team schedules preventive maintenance. On acceptance, a maintenance request is auto-created.</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="window.openPMScheduleForm()">+ New Schedule</button>
+    </div>
+    ${sched.length===0?`<div class="alert alert-info" style="margin:0"><b>No PM schedules yet.</b><br>Click "New Schedule" to plan preventive maintenance.</div>`:`
+    <div class="table-card"><div style="overflow-x:auto"><table>
+      <thead><tr>
+        <th>Machine</th><th>Scheduled Date</th><th>Frequency</th><th>Assigned To</th>
+        <th>Type</th><th>Notes</th><th>Status</th><th>Actions</th>
+      </tr></thead>
+      <tbody>
+        ${sched.map(s=>{
+          const st = statusOf(s);
+          const canAccept = (isAdmin()||isTechnicalTeam()) && st==='PENDING' || st==='OVERDUE';
+          return `<tr>
+            <td style="white-space:nowrap;font-weight:600">${s.MACHINE||'-'}</td>
+            <td style="white-space:nowrap">${(()=>{try{const d=new Date(s.SCHEDULED_DATE);const mo=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];return String(d.getDate()).padStart(2,'0')+'-'+mo[d.getMonth()]+'-'+d.getFullYear();}catch(e){return s.SCHEDULED_DATE||'-';}})()}</td>
+            <td>${s.FREQUENCY||'-'}</td>
+            <td style="white-space:nowrap">${s.ASSIGNED_TECHNICIAN||'-'}</td>
+            <td>${s.TYPE||'PM'}</td>
+            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.NOTES||'-'}</td>
+            <td><span style="color:${statusColor(st)};font-weight:700;font-size:11px">${st}</span></td>
+            <td style="white-space:nowrap">
+              ${canAccept?`<button class="btn btn-primary btn-sm" onclick="window.acceptPMSchedule('${s.SCHEDULE_ID}')">✅ Accept</button>`:''}
+              ${st==='ACCEPTED'?`<button class="btn btn-outline btn-sm" onclick="window.completePMSchedule('${s.SCHEDULE_ID}')">✓ Mark Done</button>`:''}
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table></div></div>`}`;
+}
+
+window.openPMScheduleForm=function(){
+  const machines = (APP.machineMaster||[]).map(m=>m.MACHINE_NO||m.machine).filter(Boolean);
+  const html=`<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center" id="pm-sched-overlay">
+    <div style="background:var(--bg2);border-radius:16px;padding:24px;max-width:480px;width:93%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.5)">
+      <h3 style="font-family:'Rajdhani',sans-serif;margin:0 0 14px">🛠 New PM Schedule</h3>
+      <div class="form-group">
+        <label>Machine *</label>
+        ${machines.length?`<select id="pm-machine" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
+          <option value="">Select machine</option>
+          ${machines.map(m=>`<option value="${m}">${m}</option>`).join('')}
+        </select>`:`<input type="text" id="pm-machine" placeholder="Machine name" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">`}
+      </div>
+      <div class="form-group">
+        <label>Scheduled Date *</label>
+        <input type="date" id="pm-date" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
+      </div>
+      <div class="form-group">
+        <label>Frequency</label>
+        <select id="pm-freq" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
+          <option value="ONE_TIME">One-time</option>
+          <option value="WEEKLY">Weekly</option>
+          <option value="MONTHLY">Monthly</option>
+          <option value="QUARTERLY">Quarterly</option>
+          <option value="YEARLY">Yearly</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Type</label>
+        <select id="pm-type" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
+          <option value="ME">Mechanical (ME)</option>
+          <option value="EE">Electrical (EE)</option>
+          <option value="UT">Utilities (UT)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Assigned Technician</label>
+        <input type="text" id="pm-tech" placeholder="Technician name (optional)" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px">
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea id="pm-notes" rows="3" placeholder="What needs to be done..." style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px;resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn btn-primary" onclick="window.savePMSchedule()">💾 Save Schedule</button>
+        <button class="btn btn-outline" onclick="document.getElementById('pm-sched-overlay').remove()">Cancel</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.savePMSchedule=async function(){
+  const machine = document.getElementById('pm-machine').value.trim();
+  const date    = document.getElementById('pm-date').value;
+  const freq    = document.getElementById('pm-freq').value;
+  const type    = document.getElementById('pm-type').value;
+  const tech    = document.getElementById('pm-tech').value.trim();
+  const notes   = document.getElementById('pm-notes').value.trim();
+
+  if(!machine || !date){ toast('Machine and date are required','error'); return; }
+
+  const schedId = 'PMS-'+Date.now();
+  const row = {
+    SCHEDULE_ID: schedId,
+    MACHINE: machine,
+    SCHEDULED_DATE: date,
+    FREQUENCY: freq,
+    TYPE: type,
+    ASSIGNED_TECHNICIAN: tech,
+    NOTES: notes,
+    STATUS: 'PENDING',
+    CREATED_BY: curName(),
+    CREATED_AT: new Date().toISOString()
+  };
+
+  try{
+    await apiPost('writeInchargeRow',{dept:'PM_SCHEDULE_DEPT',row}).catch(()=>{});
+    // Fallback: store via maintenanceSubmit-style generic write if dedicated endpoint absent
+    await apiPost('maintenanceSubmit',{tab:TAB_PM_SCHED,row}).catch(()=>{});
+    APP.pmSchedule = APP.pmSchedule||[];
+    APP.pmSchedule.push(row);
+    try{ localStorage.setItem(PMS_KEY, JSON.stringify(APP.pmSchedule)); }catch(e){}
+    document.getElementById('pm-sched-overlay').remove();
+    toast('✅ PM Schedule created for '+machine,'success');
+    renderPMSchedule();
+  }catch(e){
+    APP.pmSchedule = APP.pmSchedule||[];
+    APP.pmSchedule.push(row);
+    try{ localStorage.setItem(PMS_KEY, JSON.stringify(APP.pmSchedule)); }catch(e2){}
+    document.getElementById('pm-sched-overlay').remove();
+    toast('Saved locally — sync may be delayed: '+e.message,'warning');
+    renderPMSchedule();
+  }
+};
+
+window.acceptPMSchedule=async function(schedId){
+  const s = (APP.pmSchedule||[]).find(x=>x.SCHEDULE_ID===schedId);
+  if(!s){ toast('Schedule not found','error'); return; }
+  if(!confirm('Accept PM schedule for '+s.MACHINE+'? This will create a maintenance request.')) return;
+
+  s.STATUS = 'ACCEPTED';
+  s.ACCEPTED_BY = curName();
+  s.ACCEPTED_AT = new Date().toISOString();
+
+  // Auto-create a maintenance request from this PM schedule
+  const reqId = 'PM-'+Date.now();
+  const now = new Date().toISOString();
+  const newReq = {};
+  newReq[F.id]            = reqId;
+  newReq[F.notifNo]       = reqId;
+  newReq[F.dept]          = 'Maintenance';
+  newReq[F.machine]       = s.MACHINE;
+  newReq[F.type]          = s.TYPE || 'PM';
+  newReq[F.priority]      = 'MEDIUM';
+  newReq[F.status]        = 'OPEN';
+  newReq[F.description]   = 'PM Schedule: '+(s.NOTES||'Preventive maintenance — '+s.FREQUENCY);
+  newReq[F.requestedBy]   = curName();
+  newReq[F.submittedAt]   = now;
+  newReq[F.requestDate]   = now;
+
+  try{
+    await apiPost('maintenanceSubmit',{tab:TAB_REQ,row:newReq});
+    APP.maintenanceRequests = APP.maintenanceRequests||[];
+    APP.maintenanceRequests.push(newReq);
+    cacheReqs();
+
+    // Send notification — same as new maintenance request
+    _fcmPush('new_request', newReq, {
+      targetRoles: s.TYPE==='ME' ? ['MECH_INCHARGE','TECH_MANAGER'] :
+                   s.TYPE==='EE' ? ['ELEC_INCHARGE','TECH_MANAGER'] :
+                   ['UTIL_INCHARGE','TECH_UTILITY','TECH_MANAGER']
+    });
+
+    try{ localStorage.setItem(PMS_KEY, JSON.stringify(APP.pmSchedule)); }catch(e){}
+    toast('✅ Accepted — Maintenance request '+reqId+' created and notification sent','success');
+    renderPMSchedule();
+  }catch(e){
+    toast('Accept failed: '+e.message,'error');
+  }
+};
+
+window.completePMSchedule=async function(schedId){
+  const s = (APP.pmSchedule||[]).find(x=>x.SCHEDULE_ID===schedId);
+  if(!s) return;
+  s.STATUS = 'COMPLETED';
+  s.COMPLETED_AT = new Date().toISOString();
+  try{ localStorage.setItem(PMS_KEY, JSON.stringify(APP.pmSchedule)); }catch(e){}
+  toast('Marked as completed','success');
+  renderPMSchedule();
+};
+
 function renderMaintReport(){
   const c=document.getElementById('maint-content'); if(!c) return;
   const _rptDeptScope = userDeptScope(); // null = see all
@@ -17517,10 +17742,11 @@ window.downloadMaintPDF=function(){
     <td>${g(r,'partsUsed')||'-'}</td>
     <td>${g(r,'followUp')||'-'}</td>
   </tr>`).join('');
-  // Split requests by type
-  const meReqs = reqs.filter(r=>['ME','MECHANICAL','PM'].includes(String(g(r,'type')||'').toUpperCase()));
+  // Split requests by type — PM now gets its own table
+  const meReqs = reqs.filter(r=>['ME','MECHANICAL'].includes(String(g(r,'type')||'').toUpperCase()));
   const eeReqs = reqs.filter(r=>['EE','ELECTRICAL'].includes(String(g(r,'type')||'').toUpperCase()));
   const utReqs = reqs.filter(r=>['UT','UTILITIES','UTILITY'].includes(String(g(r,'type')||'').toUpperCase()));
+  const pmReqs = reqs.filter(r=>['PM'].includes(String(g(r,'type')||'').toUpperCase()));
 
   function buildMaintTable(list){
     if(!list.length) return '<tr><td colspan="18" style="text-align:center;color:#999;padding:10px">No requests</td></tr>';
@@ -17612,6 +17838,7 @@ window.downloadMaintPDF=function(){
     .sec-hdr.me{background:#eff6ff;border-left:4px solid #2563eb}
     .sec-hdr.ee{background:#fffbeb;border-left:4px solid #f59e0b}
     .sec-hdr.ut{background:#ecfdf5;border-left:4px solid #10b981}
+    .sec-hdr.pm{background:#f5f3ff;border-left:4px solid #7c3aed}
     .sec-hdr h3{font-size:10px;font-weight:700;color:#1e3a5f;flex:1}
     .sec-hdr .cnt{background:#e5e7eb;color:#374151;border-radius:10px;padding:1px 8px;font-size:8px;font-weight:600}
     table{width:100%;border-collapse:collapse;margin-bottom:4px}
@@ -17650,7 +17877,7 @@ window.downloadMaintPDF=function(){
     <div class='kpi orange'><div class='v'>${totalDT}</div><div class='l'>Total DT (min)</div></div>
   </div>
 
-  <div class='sec-hdr me'><h3>&#9881; MECHANICAL / PM REQUESTS</h3><span class='cnt'>${meReqs.length} requests</span></div>
+  <div class='sec-hdr me'><h3>&#9881; MECHANICAL REQUESTS</h3><span class='cnt'>${meReqs.length} requests</span></div>
   <table><thead><tr>${TH_ROW}</tr></thead><tbody>${buildMaintTable(meReqs)}</tbody></table>
   <hr class='divider'>
 
@@ -17660,6 +17887,10 @@ window.downloadMaintPDF=function(){
 
   <div class='sec-hdr ut'><h3>&#128295; UTILITIES REQUESTS</h3><span class='cnt'>${utReqs.length} requests</span></div>
   <table><thead><tr>${TH_ROW}</tr></thead><tbody>${buildMaintTable(utReqs)}</tbody></table>
+  <hr class='divider'>
+
+  <div class='sec-hdr pm'><h3>&#128295; PREVENTIVE MAINTENANCE (PM)</h3><span class='cnt'>${pmReqs.length} requests</span></div>
+  <table><thead><tr>${TH_ROW}</tr></thead><tbody>${buildMaintTable(pmReqs)}</tbody></table>
 
   <div class='rpt-footer'>
     <span>Universal Packaging Pvt. Ltd. &nbsp;|&nbsp; Maintenance Management System &nbsp;|&nbsp; Confidential</span>
@@ -19556,7 +19787,7 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
 
 // -- Config -----------------------------------------------------------------
 const SOF_META_KEY     = 'sof_meta_v1';      // {maintLastFetch, prodLastFetch}
-const SOF_MAINT_STALE  = 90 * 1000;          // 90 sec - maint background refresh (was 30min, too slow)
+const SOF_MAINT_STALE  = 10 * 1000;          // 10 sec - maint background refresh (real-time status updates)
 const SOF_BG_DELAY     = 4000;               // 4s after login before bg refresh
 
 // -- Meta helpers ------------------------------------------------------------
@@ -19598,12 +19829,17 @@ async function sofBgMaintRefresh(force){
       sofSetMeta({ maintLastFetch: new Date().toISOString() });
       sofSetSyncStatus('ok');
       sofUpdateAgo();
-      // Re-render maint page if currently visible
+      // Re-render ONLY the active maintenance sub-tab (preserves user's current view)
       if(APP.currentPage === 'maintenance'){
-        const c = document.getElementById('main-content');
-        if(c && typeof window.renderMaintenance === 'function'){
-          window.renderMaintenance(c);
+        const activeTabEl = document.querySelector('#maint-tabs .tab.active');
+        let activeTab = 'overview';
+        if(activeTabEl){
+          const m = (activeTabEl.getAttribute('onclick')||'').match(/switchMaintTab\(.(\w+)/);
+          if(m) activeTab = m[1];
         }
+        const H = {overview:renderMaintOverview, queue:renderMaintQueue, requests:renderMaintRequests,
+                   pmsched:(typeof renderPMSchedule==='function'?renderPMSchedule:null), report:renderMaintReport};
+        if(H[activeTab]) H[activeTab]();
       }
     }
   }catch(e){
