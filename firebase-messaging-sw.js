@@ -29,6 +29,7 @@ const messaging = firebase.messaging();
 
 // ── ERP URL (update if your domain changes) ───────────────────
 const ERP_URL = 'https://upco-production.github.io/erp-dashboard';
+const LOGO_URL = 'https://upco-production.github.io/erp-dashboard/upco-logo.png';
 
 // ── Months for date formatting ────────────────────────────────
 const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
@@ -71,7 +72,7 @@ function buildNotification(d, n) {
 
   // Title: NotifNo | Machine | Dept
   const titleParts = [notifNo, machine, dept].filter(Boolean);
-  const title = titleParts.length ? titleParts.join(' | ') : (n.title || '🔔 Maintenance Alert');
+  const title = 'UPCO Maintenance Alert' + (titleParts.length ? ' — ' + titleParts.join(' | ') : '');
 
   // Event label for context
   const eventLabels = {
@@ -124,8 +125,8 @@ messaging.onBackgroundMessage(function(payload) {
 
   const options = {
     body,
-    icon : '/icon-192.png',
-    badge: '/icon-72.png',
+    icon : LOGO_URL,
+    badge: LOGO_URL,
     tag  : reqId || ('maint-' + Date.now()),
     // CRITICAL stays on screen until dismissed
     requireInteraction: !isSilent && (priority === 'CRITICAL' || event === 'newRequest'),
@@ -204,8 +205,8 @@ self.addEventListener('push', function(event) {
       event.waitUntil(
         self.registration.showNotification(title, {
           body,
-          icon: '/icon-192.png',
-          badge:'/icon-72.png',
+          icon: LOGO_URL,
+          badge:LOGO_URL,
           tag  : d.reqId || ('maint-' + Date.now()),
           requireInteraction: (d.priority||'').toUpperCase() === 'CRITICAL',
           data : { url: ERP_URL + '/index.html#maintenance', reqId: d.reqId || '' },
