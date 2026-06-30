@@ -126,7 +126,7 @@ messaging.onBackgroundMessage(function(payload) {
   const options = {
     body,
     icon : LOGO_URL,
-    badge: LOGO_URL,
+    image: LOGO_URL,
     tag  : reqId || ('maint-' + Date.now()),
     // CRITICAL stays on screen until dismissed
     requireInteraction: !isSilent && (priority === 'CRITICAL' || event === 'newRequest'),
@@ -206,7 +206,7 @@ self.addEventListener('push', function(event) {
         self.registration.showNotification(title, {
           body,
           icon: LOGO_URL,
-          badge:LOGO_URL,
+          image: LOGO_URL,
           tag  : d.reqId || ('maint-' + Date.now()),
           requireInteraction: (d.priority||'').toUpperCase() === 'CRITICAL',
           data : { url: ERP_URL + '/index.html#maintenance', reqId: d.reqId || '' },
