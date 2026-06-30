@@ -16930,6 +16930,18 @@ window.saveStage3=async function(id){
     APP.maintenanceProgress.push(prog); cacheProg(); cacheReqs(); updateBadge();
     document.getElementById('maint-s3-overlay')?.remove();
     toast('Stage 3 saved - '+dt+' min downtime logged. Technical team can now file their report.','success');
+    // Stage 3 complete → notify technical team (matching request type) to file Stage 4 report
+    const _s3Type = String(g(r,'type')||'').toUpperCase();
+    const _s3RoleMap = {
+      'ME':['MECH_INCHARGE','TECH_MANAGER'], 'MECHANICAL':['MECH_INCHARGE','TECH_MANAGER'], 'PM':['MECH_INCHARGE','TECH_MANAGER'],
+      'EE':['ELEC_INCHARGE','TECH_MANAGER'], 'ELECTRICAL':['ELEC_INCHARGE','TECH_MANAGER'],
+      'UT':['UTIL_INCHARGE','TECH_UTILITY','TECH_MANAGER'], 'UTILITIES':['UTIL_INCHARGE','TECH_UTILITY','TECH_MANAGER']
+    };
+    _fcmPush('stage3_done', r, {
+      status:'IN_PROGRESS',
+      targetRoles:_s3RoleMap[_s3Type]||[],
+      reqDept:String(g(r,'dept')||'')
+    });
     renderMaintQueue();
   }catch(e){
     cacheReqs(); APP.maintenanceProgress.push(prog); cacheProg(); updateBadge();
@@ -17159,9 +17171,23 @@ window.saveStage5=async function(id,action){
     if(action==='CONFIRM'){
       // Confirmed/Locked → notify requester + MANAGER
       _fcmPush('confirmed', r, {
-        status:'CONFIRMED',
+        status:'LOCKED',
         targetRoles:['MANAGER','DIRECTOR'],
         targetUsers:[g(r,'submittedByUser')].filter(Boolean)
+      });
+    } else {
+      // Sent back for correction → notify technical team to revise their report
+      const _s5Type = String(g(r,'type')||'').toUpperCase();
+      const _s5RoleMap = {
+        'ME':['MECH_INCHARGE','TECH_MANAGER'], 'MECHANICAL':['MECH_INCHARGE','TECH_MANAGER'], 'PM':['MECH_INCHARGE','TECH_MANAGER'],
+        'EE':['ELEC_INCHARGE','TECH_MANAGER'], 'ELECTRICAL':['ELEC_INCHARGE','TECH_MANAGER'],
+        'UT':['UTIL_INCHARGE','TECH_UTILITY','TECH_MANAGER'], 'UTILITIES':['UTIL_INCHARGE','TECH_UTILITY','TECH_MANAGER']
+      };
+      _fcmPush('rejected', r, {
+        status:'IN_PROGRESS',
+        targetRoles:_s5RoleMap[_s5Type]||[],
+        targetUsers:[g(r,'assignedToUser')].filter(Boolean),
+        description:cmt||'Sent back for correction'
       });
     }
     toast(action==='CONFIRM'?(g(r,'notifNo')||id)+' LOCKED - record is now permanent':'Sent back for correction','success');
