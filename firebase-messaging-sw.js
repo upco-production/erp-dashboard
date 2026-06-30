@@ -29,7 +29,7 @@ const messaging = firebase.messaging();
 
 // ── ERP URL (update if your domain changes) ───────────────────
 const ERP_URL = 'https://upco-production.github.io/erp-dashboard';
-const LOGO_URL = 'https://upco-production.github.io/erp-dashboard/upco-logo.png';
+const LOGO_URL = 'https://upco-production.github.io/erp-dashboard/upco-logo-sq.png';
 
 // ── Months for date formatting ────────────────────────────────
 const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
