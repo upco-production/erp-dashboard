@@ -29,7 +29,7 @@ const messaging = firebase.messaging();
 
 // ── ERP URL (update if your domain changes) ───────────────────
 const ERP_URL = 'https://upco-production.github.io/erp-dashboard';
-const LOGO_URL = 'https://upco-production.github.io/erp-dashboard/upco-logo-sq.png';
+const LOGO_URL = 'https://upco-production.github.io/erp-dashboard/UPCO-LOGO-SQ.png';
 
 // ── Months for date formatting ────────────────────────────────
 const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
@@ -85,21 +85,19 @@ function buildNotification(d, n) {
   };
   const eventLine = eventLabels[event] || n.body || 'Maintenance update';
 
-  // Body: structured like the mockup
+  // Body: description-led, Priority+RequestedBy on one line
   const lines = [];
   if (reqLine) { lines.push(reqLine); lines.push(''); }
-  lines.push(eventLine);
-  if (desc) lines.push('');
   if (desc) lines.push(desc.slice(0, 120) + (desc.length > 120 ? '…' : ''));
   lines.push('');
-  if (priority || status)
-    lines.push('Priority: ' + (priority||'-') + '    Status: ' + (status||'-'));
+  if (priority || requestedBy)
+    lines.push('Priority: ' + (priority||'-') + (requestedBy ? '    @' + requestedBy : ''));
+  if (status)
+    lines.push('Status: ' + status);
   if (dept || machine)
     lines.push('Dept: ' + (dept||'-') + '    Machine: ' + (machine||'-'));
   if (submittedAt)
     lines.push('Date & Time: ' + fmtDatetime(submittedAt));
-  if (requestedBy)
-    lines.push('Requested By: @' + requestedBy);
   lines.push('');
   lines.push('Tap to view request details in ERP →');
 
