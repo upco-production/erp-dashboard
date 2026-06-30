@@ -530,7 +530,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="login-box">
     <div class="login-logo">
       <div class="login-logo-box" id="login-logo-box" style="background:transparent;padding:0;overflow:hidden">
-        <img src="https://upco-production.github.io/erp-dashboard/upco-logo-sq.png" alt="UP" style="width:48px;height:48px;object-fit:contain" onerror="this.parentElement.textContent='UP'">
+        <img src="https://upco-production.github.io/erp-dashboard/UPCO-LOGO-SQ.png" alt="UP" style="width:48px;height:48px;object-fit:contain" onerror="this.parentElement.textContent='UP'">
       </div>
       <div class="login-title">
         <h1>Universal Packaging</h1>
@@ -584,7 +584,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-logo" onclick="toggleSidebar()">
       <div class="logo-box" style="background:transparent;padding:0;overflow:hidden">
-        <img src="https://upco-production.github.io/erp-dashboard/upco-logo-sq.png" alt="UP" style="width:36px;height:36px;object-fit:contain" onerror="this.parentElement.textContent='UP'">
+        <img src="https://upco-production.github.io/erp-dashboard/UPCO-LOGO-SQ.png" alt="UP" style="width:36px;height:36px;object-fit:contain" onerror="this.parentElement.textContent='UP'">
       </div>
       <div class="logo-text">
         <h2>Universal Packaging</h2>
@@ -16334,7 +16334,7 @@ window.submitMaintRequest=async function(){
       // ME requests -> MECH_INCHARGE, TECH_MECHANICAL, TECH_MANAGER(MECHANICAL)
       // EE requests -> ELEC_INCHARGE, TECH_ELECTRICAL, TECH_MANAGER(ELECTRICAL)
       // UT requests -> UTIL_INCHARGE, TECH_UTILITIES, TECH_UTILITY
-      // New request → notify matching tech team only (by request type)
+      // New request → notify matching tech team AND the production dept incharge
       // PM → MECHANICAL team
       const _typeRoleMap={
         'ME':['MECH_INCHARGE','TECH_MANAGER'],
@@ -16342,7 +16342,15 @@ window.submitMaintRequest=async function(){
         'UT':['UTIL_INCHARGE','TECH_UTILITY','TECH_MANAGER'],
         'PM':['MECH_INCHARGE','TECH_MANAGER']
       };
-      const _tRoles=_typeRoleMap[String(typeCode||type||'').toUpperCase()]||[];
+      // Production dept incharge role — gets notified too (their machine, their request)
+      const _deptInchargeMap={
+        'Printing':['PRINTING_INCHARGE'],
+        'Lamination':['LAMINATION_INCHARGE'],
+        'Slitting':['SLITTING_INCHARGE'],
+        'Bag Making':['BAG_MAKING_INCHARGE']
+      };
+      const _tRoles=(_typeRoleMap[String(typeCode||type||'').toUpperCase()]||[])
+        .concat(_deptInchargeMap[dept]||[]);
       _fcmPush('new_request', _newRow, {
         status:'OPEN',
         targetRoles:_tRoles,
@@ -17325,6 +17333,7 @@ function renderPMSchedule(){
   function statusOf(s){
     if(s.STATUS==='COMPLETED') return 'COMPLETED';
     if(s.STATUS==='ACCEPTED') return 'ACCEPTED';
+    if(s.STATUS==='REJECTED') return 'REJECTED';
     const d = new Date(s.SCHEDULED_DATE);
     if(isNaN(d)) return 'PENDING';
     d.setHours(0,0,0,0);
@@ -17332,7 +17341,7 @@ function renderPMSchedule(){
     return 'PENDING';
   }
   function statusColor(st){
-    return {OVERDUE:'#dc2626',PENDING:'#2563eb',ACCEPTED:'#16a34a',COMPLETED:'#6b7280'}[st]||'#6b7280';
+    return {OVERDUE:'#dc2626',PENDING:'#2563eb',ACCEPTED:'#16a34a',COMPLETED:'#6b7280',REJECTED:'#ef4444'}[st]||'#6b7280';
   }
 
   c.innerHTML=`
@@ -17352,7 +17361,7 @@ function renderPMSchedule(){
       <tbody>
         ${sched.map(s=>{
           const st = statusOf(s);
-          const canAccept = (isAdmin()||isTechnicalTeam()) && st==='PENDING' || st==='OVERDUE';
+          const canAction = (isAdmin()||isTechnicalTeam()) && (st==='PENDING' || st==='OVERDUE');
           return `<tr>
             <td style="white-space:nowrap;font-weight:600">${s.MACHINE||'-'}</td>
             <td style="white-space:nowrap">${(()=>{try{const d=new Date(s.SCHEDULED_DATE);const mo=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];return String(d.getDate()).padStart(2,'0')+'-'+mo[d.getMonth()]+'-'+d.getFullYear();}catch(e){return s.SCHEDULED_DATE||'-';}})()}</td>
@@ -17362,7 +17371,8 @@ function renderPMSchedule(){
             <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.NOTES||'-'}</td>
             <td><span style="color:${statusColor(st)};font-weight:700;font-size:11px">${st}</span></td>
             <td style="white-space:nowrap">
-              ${canAccept?`<button class="btn btn-primary btn-sm" onclick="window.acceptPMSchedule('${s.SCHEDULE_ID}')">✅ Accept</button>`:''}
+              ${canAction?`<button class="btn btn-primary btn-sm" onclick="window.acceptPMSchedule('${s.SCHEDULE_ID}')">✅ Accept</button>
+              <button class="btn btn-danger btn-sm" onclick="window.rejectPMSchedule('${s.SCHEDULE_ID}')">❌ Reject</button>`:''}
               ${st==='ACCEPTED'?`<button class="btn btn-outline btn-sm" onclick="window.completePMSchedule('${s.SCHEDULE_ID}')">✓ Mark Done</button>`:''}
             </td>
           </tr>`;
@@ -17467,13 +17477,20 @@ window.savePMSchedule=async function(){
 };
 
 window.acceptPMSchedule=async function(schedId){
-  const s = (APP.pmSchedule||[]).find(x=>x.SCHEDULE_ID===schedId);
-  if(!s){ toast('Schedule not found','error'); return; }
-  if(!confirm('Accept PM schedule for '+s.MACHINE+'? This will create a maintenance request.')) return;
+  // Guard against rapid double-click / duplicate trigger creating multiple requests
+  if(window._pmAcceptInProgress) return;
+  window._pmAcceptInProgress = true;
+  try{
+    const s = (APP.pmSchedule||[]).find(x=>x.SCHEDULE_ID===schedId);
+    if(!s){ toast('Schedule not found','error'); return; }
+    if(s.STATUS === 'ACCEPTED' || s.STATUS === 'COMPLETED'){
+      toast('This schedule was already accepted','warning'); return;
+    }
+    if(!confirm('Accept PM schedule for '+s.MACHINE+'? This will create a maintenance request.')) return;
 
-  s.STATUS = 'ACCEPTED';
-  s.ACCEPTED_BY = curName();
-  s.ACCEPTED_AT = new Date().toISOString();
+    s.STATUS = 'ACCEPTED';
+    s.ACCEPTED_BY = curName();
+    s.ACCEPTED_AT = new Date().toISOString();
 
   // Auto-create a maintenance request from this PM schedule
   const reqId = 'PM-'+Date.now();
@@ -17491,24 +17508,27 @@ window.acceptPMSchedule=async function(schedId){
   newReq[F.submittedAt]   = now;
   newReq[F.requestDate]   = now;
 
-  try{
-    await apiPost('maintenanceSubmit',{tab:TAB_REQ,row:newReq});
-    APP.maintenanceRequests = APP.maintenanceRequests||[];
-    APP.maintenanceRequests.push(newReq);
-    cacheReqs();
+    try{
+      await apiPost('maintenanceSubmit',{tab:TAB_REQ,row:newReq});
+      APP.maintenanceRequests = APP.maintenanceRequests||[];
+      APP.maintenanceRequests.push(newReq);
+      cacheReqs();
 
-    // Send notification — same as new maintenance request
-    _fcmPush('new_request', newReq, {
-      targetRoles: s.TYPE==='ME' ? ['MECH_INCHARGE','TECH_MANAGER'] :
-                   s.TYPE==='EE' ? ['ELEC_INCHARGE','TECH_MANAGER'] :
-                   ['UTIL_INCHARGE','TECH_UTILITY','TECH_MANAGER']
-    });
+      // Send notification — same as new maintenance request
+      _fcmPush('new_request', newReq, {
+        targetRoles: s.TYPE==='ME' ? ['MECH_INCHARGE','TECH_MANAGER'] :
+                     s.TYPE==='EE' ? ['ELEC_INCHARGE','TECH_MANAGER'] :
+                     ['UTIL_INCHARGE','TECH_UTILITY','TECH_MANAGER']
+      });
 
-    try{ localStorage.setItem(PMS_KEY, JSON.stringify(APP.pmSchedule)); }catch(e){}
-    toast('✅ Accepted — Maintenance request '+reqId+' created and notification sent','success');
-    renderPMSchedule();
-  }catch(e){
-    toast('Accept failed: '+e.message,'error');
+      try{ localStorage.setItem(PMS_KEY, JSON.stringify(APP.pmSchedule)); }catch(e){}
+      toast('✅ Accepted — Maintenance request '+reqId+' created and notification sent','success');
+      renderPMSchedule();
+    }catch(e){
+      toast('Accept failed: '+e.message,'error');
+    }
+  } finally {
+    window._pmAcceptInProgress = false;
   }
 };
 
@@ -17520,6 +17540,33 @@ window.completePMSchedule=async function(schedId){
   try{ localStorage.setItem(PMS_KEY, JSON.stringify(APP.pmSchedule)); }catch(e){}
   toast('Marked as completed','success');
   renderPMSchedule();
+};
+
+window.rejectPMSchedule=async function(schedId){
+  if(window._pmAcceptInProgress) return;
+  const s = (APP.pmSchedule||[]).find(x=>x.SCHEDULE_ID===schedId);
+  if(!s){ toast('Schedule not found','error'); return; }
+  if(s.STATUS==='ACCEPTED'||s.STATUS==='COMPLETED'||s.STATUS==='REJECTED'){
+    toast('This schedule cannot be rejected now','warning'); return;
+  }
+  const reason = prompt('Reason for rejecting this PM schedule (optional):','');
+  if(reason===null) return; // cancelled
+
+  window._pmAcceptInProgress = true;
+  try{
+    s.STATUS = 'REJECTED';
+    s.REJECTED_BY = curName();
+    s.REJECTED_AT = new Date().toISOString();
+    s.REJECTION_REASON = reason||'';
+    try{
+      await apiPost('maintenanceSubmit',{tab:TAB_PM_SCHED,row:s}).catch(()=>{});
+    }catch(e){}
+    try{ localStorage.setItem(PMS_KEY, JSON.stringify(APP.pmSchedule)); }catch(e){}
+    toast('PM Schedule rejected','success');
+    renderPMSchedule();
+  } finally {
+    window._pmAcceptInProgress = false;
+  }
 };
 
 function renderMaintReport(){
@@ -17887,7 +17934,7 @@ window.downloadMaintPDF=function(){
 
   <div class='rpt-header'>
     <div class='rpt-left'>
-      <img src='https://upco-production.github.io/erp-dashboard/upco-logo-sq.png' alt='UP' onerror='this.style.display=\'none\''>
+      <img src='https://upco-production.github.io/erp-dashboard/UPCO-LOGO-SQ.png' alt='UP' onerror='this.style.display=\'none\''>
       <div class='rpt-title'>
         <h1>Universal Packaging Pvt. Ltd.</h1>
         <p>Maintenance Daily Report &nbsp;|&nbsp; Production ERP</p>
@@ -17930,12 +17977,46 @@ window.downloadMaintPDF=function(){
     <span>Universal Packaging Pvt. Ltd. &nbsp;|&nbsp; Maintenance Management System &nbsp;|&nbsp; Confidential</span>
     <span>Generated: ${new Date().toLocaleDateString('en-PK',{day:'2-digit',month:'short',year:'numeric'})}</span>
   </div>
-  <div class='no-print' style='text-align:center;margin-top:14px'>
+  <div class='no-print' style='text-align:center;margin-top:14px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap'>
     <button onclick='window.print()' style='background:#1e3a5f;color:#fff;border:none;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600'>&#128424; Print / Save PDF</button>
+    <button id='save-drive-btn' onclick='window.opener && window.opener.saveMaintReportToDriveFromPopup && window.opener.saveMaintReportToDriveFromPopup(document.documentElement.outerHTML, ${JSON.stringify(reqs.map(r=>({notifNo:g(r,"notifNo")||g(r,"id"),date:g(r,"requestDate")||g(r,"submittedAt"),time:g(r,"requestTime")||"",dept:g(r,"dept"),machine:g(r,"machine"),priority:g(r,"priority"),status:g(r,"status"),description:g(r,"description"),requestedBy:g(r,"requestedBy")||g(r,"submittedByUser"),shift:g(r,"shift"),arrival:g(r,"arrivalTime"),closing:g(r,"closingTime"),downtimeMin:g(r,"downtimeMin"),wasteKg:g(r,"wasteKg"),actionTaken:g(r,"actionTaken"),rootCause:g(r,"rootCause"),preventiveAction:g(r,"preventiveAction"),parts:g(r,"partsUsed")})))}, this)' style='background:#16a34a;color:#fff;border:none;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600'>&#128190; Save to Drive (PDF+Excel)</button>
   </div>
   <script>window.onload=function(){window.print();}<\/script>
   </body></html>`);
   win.document.close();
+};
+
+// Called from the report popup window — saves PDF+Excel into a Drive folder named by Notification Number
+window.saveMaintReportToDriveFromPopup = async function(htmlContent, rows, btnEl){
+  if(btnEl){ btnEl.disabled=true; btnEl.textContent='⏳ Saving to Drive…'; }
+  try{
+    // Group rows by notifNo so each request's report saves into its own named folder
+    const groups = {};
+    rows.forEach(r=>{
+      const key = r.notifNo || 'UNKNOWN';
+      if(!groups[key]) groups[key] = [];
+      groups[key].push(r);
+    });
+    const notifKeys = Object.keys(groups);
+    if(!notifKeys.length){
+      if(typeof toast==='function') toast('No requests to save','warning');
+      return;
+    }
+    let savedCount = 0, lastFolderUrl = '';
+    for(const notifNo of notifKeys){
+      const res = await apiPost('savemaintreport', {
+        notifNo: notifNo,
+        reportData: { rows: groups[notifNo], htmlContent: htmlContent }
+      });
+      if(res && res.ok){ savedCount++; lastFolderUrl = res.folderUrl || lastFolderUrl; }
+    }
+    if(typeof toast==='function')
+      toast('✅ Saved '+savedCount+' report(s) to Drive (PDF + Excel)','success');
+    if(btnEl){ btnEl.textContent='✅ Saved to Drive'; }
+  }catch(e){
+    if(typeof toast==='function') toast('Drive save failed: '+e.message,'error');
+    if(btnEl){ btnEl.disabled=false; btnEl.textContent='💾 Save to Drive (PDF+Excel)'; }
+  }
 };
 
 if(typeof exportMaintCSV==="undefined") var exportMaintCSV=function(){};
@@ -17961,7 +18042,15 @@ function _buildFcmData(r){
 function _fcmG(r){ return g(r,'notifNo')||g(r,'id')||''; }
 function _fcmPush(event, r, extra){
   try{
-    var data = Object.assign(_buildFcmData(r), extra||{}, {
+    var extraData = extra||{};
+    // Always notify MANAGER and MAIN_ADMIN on every maintenance event, in addition to specific targets
+    var baseRoles = Array.isArray(extraData.targetRoles) ? extraData.targetRoles.slice() : [];
+    ['MANAGER','MAIN_ADMIN'].forEach(function(role){
+      if(baseRoles.indexOf(role) === -1) baseRoles.push(role);
+    });
+    extraData = Object.assign({}, extraData, { targetRoles: baseRoles });
+
+    var data = Object.assign(_buildFcmData(r), extraData, {
       silent: window.isNotifSilent ? (window.isNotifSilent() ? 'true' : 'false') : 'false'
     });
     if(window.fcmPush&&typeof window.fcmPush[event]==='function'){
