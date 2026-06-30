@@ -15717,9 +15717,9 @@ function diffMin(a,b){
 }
 function kpi(color,label,value,sub){
   return `<div class="kpi-card ${color}" style="cursor:default">
-    <div class="kpi-label">${label}</div>
+    <div class="kpi-label" style="white-space:normal;line-height:1.3;overflow:visible;text-overflow:clip">${label}</div>
     <div class="kpi-value" style="font-size:22px;font-weight:700">${value}</div>
-    ${sub?`<div style="font-size:10px;color:var(--text3);margin-top:2px">${sub}</div>`:''}
+    ${sub?`<div style="font-size:10px;color:var(--text3);margin-top:2px;white-space:normal;line-height:1.3">${sub}</div>`:''}
   </div>`;
 }
 function pBar(pct,color){
@@ -15934,7 +15934,7 @@ const byT=t=>{
       ${kpi('purple','Avg Response',avgResp!==null?avgResp+' min':'-','Request → Accept')}
       ${kpi('cyan','Avg Resolution',avgRes!==null?avgRes+' min':'-','Arrival → Closing')}
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">
+    <div class="maint-overview-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:14px">
       <div class="chart-card">
         <div class="chart-header"><div class="chart-title">By Type</div></div>
         <div style="padding:8px 4px">
@@ -15963,9 +15963,9 @@ const byT=t=>{
           <div style="text-align:center;font-size:36px;font-weight:700;color:var(--green)">${compPct}%</div>
           <div style="text-align:center;font-size:11px;color:var(--text3);margin-bottom:8px">Completion rate</div>
           ${pBar(compPct,'var(--green)')}
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px;font-size:11px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;font-size:11px">
             ${[['OPEN','var(--cyan)'],['ACCEPTED','var(--purple)'],['IN_PROGRESS','var(--orange)'],['PENDING_REVIEW','#e879f9'],['CONFIRMED','var(--green)'],['LOCKED','#6b7280']].map(([st,col])=>
-              `<div style="text-align:center"><div style="color:${col};font-weight:600;font-size:14px">${byS(st)}</div><div style="color:var(--text3);font-size:10px">${st.replace(/_/g,' ')}</div></div>`
+              `<div style="text-align:center;min-width:0"><div style="color:${col};font-weight:600;font-size:14px">${byS(st)}</div><div style="color:var(--text3);font-size:9px;white-space:normal;line-height:1.3;word-break:break-word">${st.replace(/_/g,' ')}</div></div>`
             ).join('')}
           </div>
         </div>
@@ -16386,12 +16386,33 @@ function renderMaintQueue(){
     hint='Technical team has accepted these requests. Please log arrival time, closing time, and waste.';
   }
 
+  // Apply status filter if set
+  const _qFilter = window._maintQueueStatusFilter || 'ALL';
+  const _mineAll = mine;
+  if(_qFilter !== 'ALL'){
+    mine = mine.filter(r => g(r,'status') === _qFilter);
+  }
+  // Build status filter chip options from available statuses in _mineAll
+  const _statusCounts = {};
+  _mineAll.forEach(r => { const s = g(r,'status')||'UNKNOWN'; _statusCounts[s] = (_statusCounts[s]||0)+1; });
+  const _statusChips = ['ALL', ...Object.keys(_statusCounts)];
+
   c.innerHTML=`
     <div style="margin-bottom:12px">
       <div style="font-size:16px;font-weight:600;color:var(--cyan)">${heading}</div>
       <div style="font-size:12px;color:var(--text3);margin-top:3px">${hint}</div>
     </div>
-    ${mine.length===0?`<div class="alert alert-info" style="margin:0"><b>No items in your queue.</b><br>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      ${_statusChips.map(s=>{
+        const cnt = s==='ALL' ? _mineAll.length : (_statusCounts[s]||0);
+        const active = s===_qFilter;
+        return `<button onclick="window._maintQueueStatusFilter='${s}';renderMaintQueue();"
+          style="padding:5px 12px;border-radius:14px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid ${active?'var(--cyan)':'var(--border)'};background:${active?'var(--cyan)':'transparent'};color:${active?'#fff':'var(--text2)'}">
+          ${s.replace(/_/g,' ')} (${cnt})
+        </button>`;
+      }).join('')}
+    </div>
+    ${mine.length===0?`<div class="alert alert-info" style="margin:0"><b>No items match this filter.</b><br>
       ${isTech()?'New maintenance requests of your type will appear here.':
         isIncharge()?'Completed requests needing your sign-off will appear here.':
         'When technical team accepts your request, come back here to log the downtime details.'}</div>`:`
