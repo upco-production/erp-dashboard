@@ -162,9 +162,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 .content{flex:1;overflow-y:auto;padding:20px;background:var(--bg)}
 .content::-webkit-scrollbar{width:6px}.content::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
 
-/* KPI CARDS */
-.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
-.kpi-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;position:relative;overflow:hidden;cursor:pointer;transition:all .2s}
+/* KPI CARDS — fluid responsive grid, auto-fits available width */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:clamp(8px,2vw,12px);margin-bottom:20px}
+.kpi-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:clamp(10px,2.5vw,14px);position:relative;overflow:hidden;cursor:pointer;transition:all .2s;min-width:0}
 .kpi-card:hover{border-color:var(--border2);transform:translateY(-1px)}
 .kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
 .kpi-card.cyan::before{background:linear-gradient(90deg,var(--cyan),var(--cyan2))}
@@ -173,27 +173,27 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 .kpi-card.orange::before{background:linear-gradient(90deg,var(--orange),#ffc53d)}
 .kpi-card.purple::before{background:linear-gradient(90deg,var(--purple),#d2a8ff)}
 .kpi-card.pink::before{background:linear-gradient(90deg,var(--pink),#f0a9d7)}
-.kpi-card-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px}
-.kpi-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px}
-.kpi-badge{font-size:11px;font-weight:600;padding:3px 7px;border-radius:12px;display:flex;align-items:center;gap:3px}
+.kpi-card-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap}
+.kpi-icon{width:clamp(28px,6vw,36px);height:clamp(28px,6vw,36px);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:clamp(14px,3vw,18px);flex-shrink:0}
+.kpi-badge{font-size:clamp(9px,2vw,11px);font-weight:600;padding:3px 7px;border-radius:12px;display:flex;align-items:center;gap:3px;white-space:nowrap;flex-shrink:0}
 .kpi-badge.up{background:rgba(63,185,80,.15);color:var(--green)}
 .kpi-badge.down{background:rgba(248,81,73,.15);color:var(--red)}
 .kpi-badge.neutral{background:rgba(139,148,158,.15);color:var(--text2)}
-.kpi-value{font-family:'Rajdhani',sans-serif;font-size:28px;font-weight:700;line-height:1;color:var(--text)}
-.kpi-label{font-size:11px;color:var(--text2);margin-top:3px}
-.kpi-target{font-size:10px;color:var(--text3);margin-top:6px}
+.kpi-value{font-family:'Rajdhani',sans-serif;font-size:clamp(18px,5vw,28px);font-weight:700;line-height:1.1;color:var(--text);word-break:break-word}
+.kpi-label{font-size:clamp(10px,2.2vw,11px);color:var(--text2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi-target{font-size:clamp(9px,2vw,10px);color:var(--text3);margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kpi-target span{color:var(--cyan)}
 .kpi-progress{height:3px;background:var(--bg3);border-radius:2px;margin-top:8px;overflow:hidden}
 .kpi-progress-bar{height:100%;border-radius:2px;transition:width .5s}
 
-/* CHARTS */
-.charts-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px}
-.chart-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px}
+/* CHARTS — fluid responsive */
+.charts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:clamp(10px,2.5vw,16px);margin-bottom:20px}
+.chart-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:clamp(10px,2.5vw,16px);min-width:0;overflow:hidden}
 .chart-card.full{grid-column:1/-1}
-.chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
-.chart-title{font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:600;color:var(--text)}
-.chart-subtitle{font-size:11px;color:var(--text3)}
-.chart-wrap{position:relative;height:200px}
+.chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:8px;flex-wrap:wrap}
+.chart-title{font-family:'Rajdhani',sans-serif;font-size:clamp(12px,3vw,15px);font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chart-subtitle{font-size:clamp(9px,2vw,11px);color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chart-wrap{position:relative;height:clamp(140px,30vw,200px);width:100%}
 
 /* TABLES */
 .table-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:20px}
@@ -338,7 +338,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 
 /* Tablet: 1200px and below */
 @media(max-width:1200px){
-  .kpi-grid{grid-template-columns:repeat(2,1fr)}
+  .kpi-grid{gap:10px}
   .charts-grid{grid-template-columns:1fr}
 }
 
@@ -346,7 +346,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 @media(max-width:900px){
   .form-grid{grid-template-columns:repeat(2,1fr)}
   .form-grid-4{grid-template-columns:repeat(2,1fr)}
-  .kpi-grid{grid-template-columns:repeat(2,1fr)}
+  .kpi-grid{gap:10px}
   .header-filters{display:none}
 }
 
@@ -395,7 +395,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   .content{padding:12px}
 
   /* KPI grid: 2 columns on mobile */
-  .kpi-grid{grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px}
+  .kpi-grid{gap:8px;margin-bottom:14px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
   .kpi-card{padding:10px}
   .kpi-value{font-size:22px}
   .kpi-icon{width:28px;height:28px;font-size:14px}
@@ -475,7 +475,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 
 /* Small mobile: 480px and below */
 @media(max-width:480px){
-  .kpi-grid{grid-template-columns:repeat(2,1fr);gap:6px}
+  .kpi-grid{gap:6px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
   .kpi-card{padding:8px}
   .kpi-value{font-size:20px}
   .kpi-label{font-size:10px}
@@ -494,7 +494,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 
 /* Extra small: 360px and below */
 @media(max-width:360px){
-  .kpi-grid{grid-template-columns:1fr;gap:6px}
+  .kpi-grid{gap:6px;grid-template-columns:1fr}
   .kpi-value{font-size:22px}
   .chart-wrap{height:130px}
 }
@@ -546,7 +546,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <input type="password" id="login-pass" placeholder="Enter password">
     </div>
     <div class="login-error" id="login-error">Invalid username or password</div>
-    <button class="login-btn" onclick="doLogin()">Login</button>
+    <button class="login-btn" onclick="window.doLogin()">Login</button>
     <button class="btn btn-outline" style="width:100%;margin-top:10px" onclick="preLoginSyncDiagnostics()">Test Sheet Connection / Load Users</button>
     <div id="login-url-section" style="margin-top:12px">
       <div style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:6px" onclick="(function(){var s=document.getElementById('login-url-fields');s.style.display=s.style.display==='none'?'block':'none'})()">
@@ -1155,7 +1155,7 @@ function doLogin() {
   toast('Login successful. Welcome, '+user.name+'!','success');
 }
 document.getElementById('login-user').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('login-pass').focus(); });
-document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') window.doLogin(); });
 
 function doLogout() {
   if(!confirm('Logout?')) return;
@@ -17496,32 +17496,62 @@ window.downloadMaintPDF=function(){
 
   function buildMaintTable(list){
     if(!list.length) return '<tr><td colspan="18" style="text-align:center;color:#999;padding:10px">No requests</td></tr>';
+    // Format ISO datetime to readable format
+    function fmtRptDate(v){
+      if(!v||v==='-') return '-';
+      try{
+        const d=new Date(v);
+        if(isNaN(d)) return v;
+        const mo=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+        return String(d.getDate()).padStart(2,'0')+'-'+mo[d.getMonth()]+'-'+d.getFullYear();
+      }catch(e){return v;}
+    }
+    function fmtRptTime(v){
+      if(!v||v==='-') return '-';
+      try{
+        // Already 12hr format
+        if(/AM|PM/i.test(v)) return v;
+        // ISO datetime
+        const d=new Date(v);
+        if(!isNaN(d)){
+          let h=d.getHours(), m=String(d.getMinutes()).padStart(2,'0');
+          const ap=h>=12?'PM':'AM'; h=h%12||12;
+          return String(h).padStart(2,'0')+':'+m+' '+ap;
+        }
+        // HH:MM format
+        const p=v.match(/^(\d{1,2}):(\d{2})/);
+        if(p){
+          let h=parseInt(p[1]),m=p[2];
+          const ap=h>=12?'PM':'AM'; h=h%12||12;
+          return String(h).padStart(2,'0')+':'+m+' '+ap;
+        }
+        return v;
+      }catch(e){return v;}
+    }
     return list.map(r=>{
       const pri=g(r,'priority')||'';
       const sta=g(r,'status')||'';
       const priC=pri==='CRITICAL'?'#dc2626':pri==='HIGH'?'#ea580c':pri==='MEDIUM'?'#d97706':'#16a34a';
       const staC=['CONFIRMED','LOCKED'].includes(sta)?'#16a34a':['REJECTED'].includes(sta)?'#dc2626':'#2563eb';
-      const dtStr=g(r,'requestDate')||g(r,'submittedAt')||'';
-      let dtFmt='-';try{const dd=new Date(dtStr);if(!isNaN(dd)){const mo=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];dtFmt=String(dd.getDate()).padStart(2,'0')+'-'+mo[dd.getMonth()]+'-'+dd.getFullYear();}}catch(e){}
       return `<tr>
-        <td style='font-weight:700;color:#1e3a5f'>${g(r,'notifNo')||g(r,'id')||'-'}</td>
-        <td>${dtFmt}</td>
-        <td>${g(r,'requestTime')||'-'}</td>
+        <td style='font-weight:700;color:#1e3a5f;white-space:nowrap'>${g(r,'notifNo')||g(r,'id')||'-'}</td>
+        <td style='white-space:nowrap'>${fmtRptDate(g(r,'requestDate')||g(r,'submittedAt'))}</td>
+        <td style='white-space:nowrap'>${fmtRptTime(g(r,'requestTime')||g(r,'submittedAt'))}</td>
         <td>${g(r,'dept')||'-'}</td>
-        <td>${g(r,'machine')||'-'}</td>
+        <td style='white-space:nowrap'>${g(r,'machine')||'-'}</td>
         <td><b style='color:${priC}'>${pri||'-'}</b></td>
         <td><b style='color:${staC}'>${sta||'-'}</b></td>
-        <td style='max-width:160px'>${g(r,'description')||'-'}</td>
-        <td>${g(r,'requestedBy')||g(r,'submittedByUser')||'-'}</td>
+        <td style='min-width:180px;word-wrap:break-word'>${g(r,'description')||'-'}</td>
+        <td style='white-space:nowrap'>${g(r,'requestedBy')||g(r,'submittedByUser')||'-'}</td>
         <td>${g(r,'shift')||'-'}</td>
-        <td>${g(r,'arrivalTime')||'-'}</td>
-        <td>${g(r,'closingTime')||'-'}</td>
+        <td style='white-space:nowrap'>${fmtRptTime(g(r,'arrivalTime'))}</td>
+        <td style='white-space:nowrap'>${fmtRptTime(g(r,'closingTime'))}</td>
         <td style='text-align:center'>${g(r,'downtimeMin')||'0'}</td>
         <td style='text-align:center'>${g(r,'wasteKg')||'0'}</td>
-        <td style='max-width:140px'>${g(r,'actionTaken')||'-'}</td>
-        <td style='max-width:140px'>${g(r,'rootCause')||'-'}</td>
-        <td style='max-width:140px'>${g(r,'preventiveAction')||'-'}</td>
-        <td>${g(r,'partsUsed')||'-'}</td>
+        <td style='min-width:160px;word-wrap:break-word'>${g(r,'actionTaken')||'-'}</td>
+        <td style='min-width:160px;word-wrap:break-word'>${g(r,'rootCause')||'-'}</td>
+        <td style='min-width:160px;word-wrap:break-word'>${g(r,'preventiveAction')||'-'}</td>
+        <td style='min-width:120px;word-wrap:break-word'>${g(r,'partsUsed')||'-'}</td>
       </tr>`;
     }).join('');
   }
@@ -19360,6 +19390,14 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
   // -- 2. Merge ACM data into a user object --------------------------------
   function mergeACMIntoUser(user, acmEntry){
     if(!user || !acmEntry) return user;
+    // MAIN_ADMIN always has full access — never restrict via ACM
+    var role = String(user.role||'').trim().toUpperCase();
+    if(role === 'MAIN_ADMIN'){
+      user.modules = null; // null = no restriction (applySidebarRoles bypasses MAIN_ADMIN anyway)
+      user.canCreateMaintReq = true;
+      user.canAcceptMaintReq = true;
+      return user;
+    }
     user.modules           = acmEntry.modules;
     user.canCreateMaintReq = acmEntry.canCreateMaintReq;
     user.canAcceptMaintReq = acmEntry.canAcceptMaintReq;
