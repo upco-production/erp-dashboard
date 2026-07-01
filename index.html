@@ -12792,10 +12792,18 @@ navigate = (function(orig){
           Object.keys(_mods).forEach(function(k) {
             if (_mods[k] === true || String(_mods[k]).toUpperCase() === 'TRUE') _allowed.add(k.toLowerCase());
           });
-        } else if (isTechnicalTeam() || isMaintenanceIncharge()) {
-          _allowed = new Set(['dashboard', 'downtime', 'maintenance']);
         } else {
-          _allowed = new Set(['dashboard', 'maintenance']);
+          // ACM not loaded yet — try to load it now, apply minimal restriction temporarily
+          if(typeof window.loadAndMergeACM === 'function'){
+            window.loadAndMergeACM().then(function(){
+              if(typeof window.applySidebarRoles === 'function') window.applySidebarRoles();
+            }).catch(function(){});
+          }
+          if (isTechnicalTeam() || isMaintenanceIncharge()) {
+            _allowed = new Set(['dashboard', 'downtime', 'maintenance']);
+          } else {
+            _allowed = new Set(['dashboard', 'maintenance']);
+          }
         }
         if (!_allowed.has(page)) {
           if (typeof toast === 'function') toast('Is section ka access nahi hai.', 'error');
@@ -21321,6 +21329,23 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
             try{ if(typeof syncNowClick==='function') syncNowClick(); }catch(e){}
           }, 1000);
 
+          // Load ACM with retry after session restore
+          var _acmRestoreAttempts = 0;
+          async function _loadACMAfterRestore(){
+            _acmRestoreAttempts++;
+            try{
+              if(typeof window.loadAndMergeACM === 'function'){
+                await window.loadAndMergeACM();
+                if(typeof window.applySidebarRoles === 'function') window.applySidebarRoles();
+                console.log('[ACM] Restore load OK on attempt ' + _acmRestoreAttempts);
+              }
+            }catch(e){
+              if(_acmRestoreAttempts < 5)
+                setTimeout(_loadACMAfterRestore, 2000 * _acmRestoreAttempts);
+            }
+          }
+          setTimeout(_loadACMAfterRestore, 1200);
+
         } else if(attemptsLeft > 0 && (users.length === 0 || !matched)){
           // Users not loaded yet, OR loaded but stale (e.g. PWA resumed with old cache) - keep retrying
           // Do NOT delete the session here — only a genuine credential mismatch after full sync should logout
@@ -22835,21 +22860,30 @@ setTimeout(function(){
     };
   }
 
-  /* -- If already logged in (auto-login), register token + load ACM --- */
+  /* -- If already logged in (auto-login), register token + load ACM with retry --- */
   setTimeout(function(){
     try{
       var user = getUser();
       if(user && user.username){
         requestAndRegisterToken();
-        // Load ACM so sidebar restrictions apply immediately
-        setTimeout(async function(){
+        // Load ACM with retry until it succeeds — ensures sidebar is always correct
+        var _acmAttempts = 0;
+        async function _loadACMWithRetry(){
+          _acmAttempts++;
           try{
             if(typeof window.loadAndMergeACM === 'function'){
               await window.loadAndMergeACM();
               if(typeof window.applySidebarRoles === 'function') window.applySidebarRoles();
+              console.log('[ACM] Loaded on attempt ' + _acmAttempts);
             }
-          }catch(e){ console.warn('[ACM] Auto-load failed:', e.message); }
-        }, 500);
+          }catch(e){
+            console.warn('[ACM] Attempt ' + _acmAttempts + ' failed: ' + e.message);
+            if(_acmAttempts < 5){
+              setTimeout(_loadACMWithRetry, 2000 * _acmAttempts); // exponential backoff
+            }
+          }
+        }
+        setTimeout(_loadACMWithRetry, 800);
       }
     }catch(e){}
   }, 2000);
