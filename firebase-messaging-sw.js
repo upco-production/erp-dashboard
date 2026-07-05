@@ -188,39 +188,6 @@ self.addEventListener('notificationclick', function(event) {
   );
 });
 
-// ── Push fallback (if onBackgroundMessage doesn't fire) ───────
-self.addEventListener('push', function(event) {
-  if (!event.data) return;
-  try {
-    const payload = event.data.json();
-    console.log('[SW] Raw push:', payload);
-
-    // If Firebase didn't handle it, show manually
-    const n = payload.notification || {};
-    const d = payload.data         || {};
-
-    if (n.title || d.title) {
-      const { title, body } = buildNotification(d, n);
-      event.waitUntil(
-        self.registration.showNotification(title, {
-          body,
-          icon: LOGO_URL,
-          tag  : d.reqId || ('maint-' + Date.now()),
-          requireInteraction: (d.priority||'').toUpperCase() === 'CRITICAL',
-          data : { url: ERP_URL + '/index.html#maintenance', reqId: d.reqId || '' },
-          actions: [
-            { action: 'queue',   title: '📋 My Queue'    },
-            { action: 'view',    title: '📋 Open Request' },
-            { action: 'dismiss', title: 'Dismiss'         },
-          ],
-        })
-      );
-    }
-  } catch(e) {
-    console.log('[SW] Push parse error:', e.message);
-  }
-});
-
 // ── Service Worker lifecycle ──────────────────────────────────
 self.addEventListener('install',  () => self.skipWaiting());
 self.addEventListener('activate', e  => e.waitUntil(clients.claim()));
