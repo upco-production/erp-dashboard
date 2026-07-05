@@ -904,6 +904,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
             <div id="notif-enable-menu-item" onclick="window.upFCM&&window.upFCM.register();document.getElementById('user-menu-dropdown').style.display='none';" style="padding:10px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
               🔔 Enable Notifications
             </div>
+            <div id="notif-test-menu-item" onclick="window.upFCMDiagnose&&window.upFCMDiagnose();document.getElementById('user-menu-dropdown').style.display='none';" style="padding:10px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
+              🧪 Test Notification
+            </div>
             <div onclick="window.doLogout()" style="padding:10px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--red);transition:background .15s;border-top:1px solid var(--border)" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
               🚪 Logout
             </div>
@@ -23235,6 +23238,59 @@ setTimeout(function(){
     send    : window.upSendPush,
     getToken: function(){ return _fcmToken || localStorage.getItem('up_fcm_token'); }
   };
+
+  // -- Step-by-step diagnostic ------------------------------------------
+  // Checks each point of failure in order (browser support → permission →
+  // token registration → actual send) and reports exactly which one
+  // failed, instead of a generic "didn't work". Sends a real test push
+  // through the SAME pipeline as a real maintenance action, targeted only
+  // at the current user's own token(s).
+  window.upFCMDiagnose = async function(){
+    const steps = [];
+    const user = (typeof getUser==='function') ? getUser() : (APP.currentUser||null);
+
+    // Step 1: browser support
+    const supported = ('Notification' in window) && ('serviceWorker' in navigator);
+    steps.push(['Browser support', supported ? '✅ OK' : '❌ Not supported (old browser or non-HTTPS)']);
+    if(!supported){ upFCMShowDiagnostic(steps); return; }
+
+    // Step 2: permission
+    const perm = Notification.permission;
+    steps.push(['Notification permission', perm==='granted' ? '✅ Granted' : perm==='denied' ? '❌ Blocked - enable in browser settings' : '⚠️ Not asked yet - click Enable Notifications first']);
+    if(perm!=='granted'){ upFCMShowDiagnostic(steps); return; }
+
+    // Step 3: token registered
+    const token = (window.upFCM && typeof window.upFCM.getToken==='function') ? window.upFCM.getToken() : null;
+    steps.push(['Device token', token ? ('✅ Present ('+token.slice(0,16)+'...)') : '❌ No token - click Enable Notifications']);
+    if(!token){ upFCMShowDiagnostic(steps); return; }
+
+    // Step 4: actually send a real test push to THIS user only
+    steps.push(['Sending test push...', '⏳']);
+    upFCMShowDiagnostic(steps);
+    try{
+      const result = await window.upSendPush('test', {
+        targetUsers: [user ? (user.username||'') : ''],
+        description: 'This is a test notification from Enable Notifications diagnostics.',
+        dept: '', silent: 'false'
+      });
+      steps[steps.length-1] = ['Sending test push', (result && result.ok!==false) ? ('✅ Sent (server responded ok'+(result.sent!==undefined?', '+result.sent+' device(s)':'')+')') : '❌ Server error: '+(result&&result.error||'unknown')];
+      steps.push(['What to check now', 'If you don\'t see a notification within ~10s: check the browser/OS notification settings for this site are not muted, and that this device is not in Do Not Disturb / Focus mode.']);
+    }catch(e){
+      steps[steps.length-1] = ['Sending test push', '❌ Request failed: '+e.message];
+    }
+    upFCMShowDiagnostic(steps);
+  };
+
+  function upFCMShowDiagnostic(steps){
+    if(typeof document==='undefined') return;
+    const rows = steps.map(([label,status])=>`<tr><td style="padding:6px 10px;font-size:12px;color:var(--text2)">${label}</td><td style="padding:6px 10px;font-size:12px;font-weight:600">${status}</td></tr>`).join('');
+    if(document.getElementById('modal-title')){
+      document.getElementById('modal-title').textContent = '🧪 Notification Diagnostics';
+      document.getElementById('modal-body').innerHTML = `<table style="width:100%;border-collapse:collapse">${rows}</table>`;
+      document.getElementById('modal-footer').innerHTML = '<button class="btn btn-outline" onclick="closeModal()">Close</button>';
+      document.getElementById('modal-overlay').style.display='flex';
+    }
+  }
 
   // Expose directly for bell button
   window._fcmRegisterNow = requestAndRegisterToken;
