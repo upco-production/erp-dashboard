@@ -1196,7 +1196,9 @@ var APP = {
     bagMakingStandardSpeed: 0,   // Bag Making standard speed, compared against AVERAGE_SPEED for EE % (Bag Making has no meters figure)
     machineFactorsEE: {},        // per-machine running-minutes factor for EE only, keyed by machine code - overrides the global EE multiplier/divisor ratio for that one machine. Independent from OEE.
     machineFactorsOEE: {},       // per-machine running-minutes factor for OEE only, keyed by machine code - overrides the global OEE multiplier/divisor ratio for that one machine. Independent from EE.
-    machineStandardSpeeds: {}    // per-machine standard speed override, keyed by machine code - takes priority over Machine Master's own value and the Bag Making/Default fallbacks
+    machineStandardSpeeds: {},   // per-machine standard speed override, keyed by machine code - takes priority over Machine Master's own value and the Bag Making/Default fallbacks
+    machinePlanDT: {},           // per-machine MANUAL Planning Downtime override (minutes) for the OEE table, keyed by machine code - overrides the sheet-summed value; used to compute Available Min and OEE %
+    machineUnplanDT: {}          // per-machine MANUAL Unplanned Downtime override (minutes) for the OEE table, keyed by machine code - overrides the sheet-summed value; used to compute Available Min and OEE %
   },
   
   targets: [
@@ -6932,6 +6934,8 @@ function buildMachineCalcRows(month){
   const globalOeeRatio = (+cs.oeeGlobalFactor || 1);
   const machineFactorsEE = (cs.machineFactorsEE && typeof cs.machineFactorsEE==='object') ? cs.machineFactorsEE : {};
   const machineFactorsOEE = (cs.machineFactorsOEE && typeof cs.machineFactorsOEE==='object') ? cs.machineFactorsOEE : {};
+  const machinePlanDT = (cs.machinePlanDT && typeof cs.machinePlanDT==='object') ? cs.machinePlanDT : {};
+  const machineUnplanDT = (cs.machineUnplanDT && typeof cs.machineUnplanDT==='object') ? cs.machineUnplanDT : {};
   return machines.map(m=>{
     const rows = APP.productionData.filter(r=>r.month===month && r.machine===m.code && r.dept===m.dept);
     const records = rows.length;
@@ -6950,15 +6954,37 @@ function buildMachineCalcRows(month){
     const totalOEEPmin = rows.reduce((a,r)=>a+(+r.oeePmin||0),0);
     const totalJobTime = sum(rows,'totalJobTimeMin');
     const totalTechDT = sum(rows,'downtime');
-    const totalPlanDT = rows.reduce((a,r)=>a+(+r.planningDT||0),0);
-    const totalAvailable = totalJobTime - totalTechDT - totalPlanDT;
+    const codeKey0 = String(m.code||'').trim().toUpperCase();
+    // Plan DT: manual override (entered by admin in the OEE table) takes
+    // priority over the sheet-summed value — Available Min and OEE % both
+    // recompute from whichever one is active.
+    const sheetPlanDT = rows.reduce((a,r)=>a+(+r.planningDT||0),0);
+    const totalPlanDT = machinePlanDT[codeKey0]!==undefined ? (+machinePlanDT[codeKey0]||0) : sheetPlanDT;
+    const isPlanDTManual = machinePlanDT[codeKey0]!==undefined;
+    // Unplan DT: same manual-override pattern as Plan DT.
+    const sheetUnplanDT = rows.reduce((a,r)=>a+(+r.unplannedDT||0),0);
+    const totalUnplanDT = machineUnplanDT[codeKey0]!==undefined ? (+machineUnplanDT[codeKey0]||0) : sheetUnplanDT;
+    const isUnplanDTManual = machineUnplanDT[codeKey0]!==undefined;
+    const totalAvailable = totalJobTime - totalTechDT - totalPlanDT - totalUnplanDT;
     const standardSpeed = records ? (rows.find(r=>+r.standardSpeed>0)?.standardSpeed || 0) : 0;
-    const ee = records ? avg(rows,'ee') : 0;
+    // Bag Making uses PCS (its real output unit); everyone else uses Meter.
+    const eeVolume = isBag ? totalPcs : totalMeter;
+    // Average Speed = Production Volume ÷ Running Min AFTER Factor applied
+    // (totalEEPmin, not raw totalPmin).
+    const avgSpeed = totalEEPmin>0 ? (eeVolume/totalEEPmin) : 0;
+    // EE% = Average Speed ÷ Standard Speed × 100 — from the SAME aggregate
+    // totals shown in this row, not a simple average of each job's own
+    // EE% (which could get dragged way down by a few jobs with missing/
+    // zero data, producing a number that didn't match what you'd calculate
+    // by hand from the Average Speed / Standard Speed columns next to it).
+    const ee = (avgSpeed>0 && standardSpeed>0)
+      ? (avgSpeed/standardSpeed)*100
+      : (records ? avg(rows,'ee') : 0);
     const oee = records ? avg(rows,'oee') : 0;
     const codeKey = String(m.code||'').trim().toUpperCase();
     const effectiveFactorEE = machineFactorsEE[codeKey]!==undefined ? +machineFactorsEE[codeKey] : globalRatio;
     const effectiveFactorOEE = machineFactorsOEE[codeKey]!==undefined ? +machineFactorsOEE[codeKey] : globalOeeRatio;
-    return {code:m.code, codeKey, dept:m.dept, records, isBag, totalMeter, totalPcs, totalAvgSpeed, totalPmin, totalEEPmin, totalOEEPmin, totalJobTime, totalTechDT, totalPlanDT, totalAvailable, standardSpeed, effectiveFactorEE, effectiveFactorOEE, ee, oee};
+    return {code:m.code, codeKey, dept:m.dept, records, isBag, totalMeter, totalPcs, totalAvgSpeed, totalPmin, totalEEPmin, totalOEEPmin, totalJobTime, totalTechDT, totalPlanDT, isPlanDTManual, totalUnplanDT, isUnplanDTManual, totalAvailable, standardSpeed, avgSpeed, effectiveFactorEE, effectiveFactorOEE, ee, oee};
   }).filter(m=>m.records>0);
 }
 
@@ -6974,6 +7000,8 @@ function eeRowHTML(m){
   const prodCell = m.isBag
     ? `<td>${(m.totalPcs/1e6).toFixed(2)} Mn PCS<div style="font-size:9px;color:var(--text3)">Avg Speed: ${m.totalAvgSpeed.toFixed(1)}</div></td>`
     : `<td>${m.totalMeter.toFixed(0)} m</td>`;
+  // Average Speed = Production Meter (or PCS for Bag Making) ÷ Running Min
+  const avgSpeedCell = `<td>${m.avgSpeed.toFixed(2)}${m.isBag?' PCS/min':' m/min'}</td>`;
   const speedCell = isAdmin
     ? `<td><input type="number" id="${machInputId('mf-speed',m.codeKey)}" data-machine-code="${m.codeKey}" value="${m.standardSpeed||0}" step="0.01" style="width:70px"></td>`
     : `<td>${(+m.standardSpeed||0).toFixed(2)}</td>`;
@@ -6986,6 +7014,7 @@ function eeRowHTML(m){
     <td>${m.records}</td>
     <td>${m.totalPmin.toFixed(1)}</td>
     ${prodCell}
+    ${avgSpeedCell}
     ${speedCell}
     ${factorCell}
     <td style="font-weight:600;color:var(--cyan)">${m.totalEEPmin.toFixed(1)}</td>
@@ -6999,13 +7028,25 @@ function oeeRowHTML(m){
   const factorCell = isAdmin
     ? `<td><input type="number" id="${machInputId('mf-factor-oee',m.codeKey)}" data-machine-code="${m.codeKey}" value="${m.effectiveFactorOEE}" step="0.01" style="width:70px"></td>`
     : `<td>${(+m.effectiveFactorOEE).toFixed(2)}</td>`;
+  // Plan DT: manual entry, same pattern as Standard Speed / EE Factor.
+  // Leaving it blank falls back to the sheet-summed Planning Downtime;
+  // typing a value overrides it, and Available Min / OEE % recalculate
+  // from whatever value is active (see buildMachineCalcRows).
+  const planDTCell = isAdmin
+    ? `<td><input type="number" id="${machInputId('mf-plandt',m.codeKey)}" data-machine-code="${m.codeKey}" value="${m.totalPlanDT.toFixed(0)}" step="1" style="width:70px" title="${m.isPlanDTManual?'Manually overridden':'From sheet - edit to override'}"></td>`
+    : `<td>${m.totalPlanDT.toFixed(0)}${m.isPlanDTManual?' <span class="badge badge-blue" style="font-size:8px">manual</span>':''}</td>`;
+  // Unplan DT: same manual-entry pattern as Plan DT.
+  const unplanDTCell = isAdmin
+    ? `<td><input type="number" id="${machInputId('mf-unplandt',m.codeKey)}" data-machine-code="${m.codeKey}" value="${m.totalUnplanDT.toFixed(0)}" step="1" style="width:70px" title="${m.isUnplanDTManual?'Manually overridden':'From sheet - edit to override'}"></td>`
+    : `<td>${m.totalUnplanDT.toFixed(0)}${m.isUnplanDTManual?' <span class="badge badge-blue" style="font-size:8px">manual</span>':''}</td>`;
   return `<tr>
     <td style="font-family:monospace;color:var(--cyan)">${m.code}${m.isBag?' <span class="badge badge-gray" style="font-size:8px">live</span>':''}</td>
     <td>${m.dept}</td>
     <td>${m.records}</td>
     <td>${m.totalJobTime.toFixed(0)}</td>
     <td>${m.totalTechDT.toFixed(0)}</td>
-    <td>${m.totalPlanDT.toFixed(0)}</td>
+    ${planDTCell}
+    ${unplanDTCell}
     <td>${m.totalAvailable.toFixed(0)}</td>
     <td>${m.totalPmin.toFixed(1)}</td>
     ${factorCell}
@@ -7073,7 +7114,7 @@ function renderEffCenterEECalc(){
       <div class="table-header"><div class="table-title">EE % - every machine, ${APP.currentMonth}</div></div>
       <div style="font-size:11px;color:var(--text3);padding:8px 12px 0">Per-machine Factor and Standard Speed override the global settings for that machine only. Bag Making shows Production PCS (Mn PCS) instead of Meter. Factor only affects EE, never OEE.</div>
       <div style="overflow-x:auto"><table>
-        <thead><tr><th>Machine</th><th>Dept</th><th>Records</th><th>Running Min</th><th>Production (Meter / Mn PCS)</th><th>Standard Speed</th><th>EE Factor</th><th>Production Time After Factor</th><th>EE %</th></tr></thead>
+        <thead><tr><th>Machine</th><th>Dept</th><th>Records</th><th>Running Min</th><th>Production (Meter / Mn PCS)</th><th>Average Speed</th><th>Standard Speed</th><th>EE Factor</th><th>Production Time After Factor</th><th>EE %</th></tr></thead>
         <tbody>${machRows.length ? machRows.map(eeRowHTML).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:20px">No machine data for '+APP.currentMonth+'</td></tr>'}</tbody>
       </table></div>
       ${machRows.length ? `<div style="padding:10px 12px"><button class="btn btn-primary btn-sm" onclick="saveMachineCalcSettings()">💾 Save Machine Settings</button></div>` : ''}
@@ -7124,8 +7165,8 @@ function renderEffCenterOEECalc(){
       <div class="table-header"><div class="table-title">OEE % - every machine, ${APP.currentMonth}</div></div>
       <div style="font-size:11px;color:var(--text3);padding:8px 12px 0">Per-machine OEE Factor overrides the global factor for that machine only. Independent from EE - changing OEE factor never affects EE %.</div>
       <div style="overflow-x:auto"><table>
-        <thead><tr><th>Machine</th><th>Dept</th><th>Records</th><th>Job Time</th><th>Tech DT</th><th>Plan DT</th><th>Available</th><th>Running Min</th><th>OEE Factor</th><th>Production Time After Factor</th><th>OEE %</th></tr></thead>
-        <tbody>${machRows.length ? machRows.map(oeeRowHTML).join('') : '<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:20px">No machine data for '+APP.currentMonth+'</td></tr>'}</tbody>
+        <thead><tr><th>Machine</th><th>Dept</th><th>Records</th><th>Job Time</th><th>Tech DT</th><th>Plan DT</th><th>Unplan DT</th><th>Available</th><th>Running Min</th><th>OEE Factor</th><th>Production Time After Factor</th><th>OEE %</th></tr></thead>
+        <tbody>${machRows.length ? machRows.map(oeeRowHTML).join('') : '<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:20px">No machine data for '+APP.currentMonth+'</td></tr>'}</tbody>
       </table></div>
       ${machRows.length ? `<div style="padding:10px 12px"><button class="btn btn-primary btn-sm" onclick="saveMachineCalcSettings()">💾 Save Machine Settings</button></div>` : ''}
     </div>
@@ -7145,6 +7186,8 @@ function saveMachineCalcSettings(){
   APP.calcSettings.machineFactorsEE = APP.calcSettings.machineFactorsEE || {};
   APP.calcSettings.machineFactorsOEE = APP.calcSettings.machineFactorsOEE || {};
   APP.calcSettings.machineStandardSpeeds = APP.calcSettings.machineStandardSpeeds || {};
+  APP.calcSettings.machinePlanDT = APP.calcSettings.machinePlanDT || {};
+  APP.calcSettings.machineUnplanDT = APP.calcSettings.machineUnplanDT || {};
   let updated = 0;
   document.querySelectorAll('input[id^="mf-factor-ee-"]').forEach(el=>{
     const code = el.getAttribute('data-machine-code');
@@ -7163,6 +7206,20 @@ function saveMachineCalcSettings(){
     if(!code) return;
     const val = parseFloat(el.value);
     if(!isNaN(val) && val>0){ APP.calcSettings.machineStandardSpeeds[code] = val; }
+  });
+  // Plan DT manual override — used to recompute Available Min / OEE %.
+  document.querySelectorAll('input[id^="mf-plandt-"]').forEach(el=>{
+    const code = el.getAttribute('data-machine-code');
+    if(!code) return;
+    const val = parseFloat(el.value);
+    if(!isNaN(val) && val>=0){ APP.calcSettings.machinePlanDT[code] = val; updated++; }
+  });
+  // Unplan DT manual override — same pattern as Plan DT.
+  document.querySelectorAll('input[id^="mf-unplandt-"]').forEach(el=>{
+    const code = el.getAttribute('data-machine-code');
+    if(!code) return;
+    const val = parseFloat(el.value);
+    if(!isNaN(val) && val>=0){ APP.calcSettings.machineUnplanDT[code] = val; updated++; }
   });
   persistCalcSettings();
   try{ if(typeof recalcProductionRows==='function') recalcProductionRows(); }catch(e){}
