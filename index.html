@@ -22735,6 +22735,19 @@ setTimeout(function(){
       _messaging.onMessage(function(payload){
         console.log('[FCM] Foreground message:', payload);
         showFCMToast(payload);
+        // LIVE UPDATE: a maintenance action just happened somewhere (new
+        // request, accepted, rejected, tech complete, confirmed, etc).
+        // Previously this only showed a toast — anyone else with the
+        // Maintenance tab open still had to wait for the next 10s poll
+        // cycle to actually see the change. Force an immediate refresh
+        // instead, so every open Maintenance tab updates the moment any
+        // action happens, not just the person who took the action.
+        try{
+          if(APP && APP.currentPage === 'maintenance' && typeof window.sofBgMaintRefresh === 'function'){
+            window.sofBgMaintRefresh(true);
+          }
+          if(typeof window.updateBadge === 'function') window.updateBadge();
+        }catch(e){ console.warn('[FCM] Live refresh on foreground push failed:', e.message); }
       });
 
       // Handle SW → ERP messages (notification tap when tab was open)
