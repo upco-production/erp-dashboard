@@ -20709,6 +20709,7 @@ console.log('[SRS] Single Row Sync Engine v1.0 loaded');
 var UPC_KEYS = {
   productionData : 'upc_production_v2',
   wipData        : 'upc_wip_v2',
+  wipStageBalance: 'upc_wip_stage_v2',
   inkData        : 'upc_ink_v2',
   planningData   : 'upc_planning_v2',
   materialData   : 'upc_material_v2',
@@ -21054,10 +21055,36 @@ function upcHookSync(){
   log('ok','UPC hooked syncAllSheets','');
 }
 
-// -- 11. SYNCNOWCLICK - no separate wrap needed ---------------
-// syncNowClick calls syncAllSheets, which UPC already wraps above.
-// Double-wrapping would fire upcPostSync twice on every Sync Now.
-function upcHookSyncNowClick(){ /* intentionally empty - covered by syncAllSheets hook */ }
+// -- 11. SYNCNOWCLICK - wrap directly, don't rely on syncAllSheets --------
+// BUG (fixed): the old assumption was "syncNowClick always calls
+// syncAllSheets, which UPC already wraps above" — but syncNowClick has a
+// SINGLE-DEPT smart-sync path (used on Printing/Lamination/Slitting/Bag
+// Making/Dispatch/Quality/FG/WIP pages — i.e. most of the time) that calls
+// sseFetchDept() directly and NEVER touches syncAllSheets. That meant the
+// cache only got rebuilt immediately after Sync Now while on Dashboard or
+// Downtime; everywhere else, cache silently waited on the 10s periodic
+// save (or a sidebar nav click) to eventually catch up — which looked
+// exactly like "Sync Now didn't rebuild the cache" if checked right after.
+function upcHookSyncNowClick(){
+  if(!window.syncNowClick || window.syncNowClick.__upcHooked) return;
+  var prev = window.syncNowClick;
+  var wrapped = async function(){
+    var result;
+    try{
+      result = await prev.apply(this, arguments);
+    }catch(e){
+      log('warn','UPC: syncNowClick error',e.message);
+      throw e;
+    }
+    // upcPostSync's own _upcPostSyncRunning guard (2s window) already
+    // prevents a double-fire if syncAllSheets also ran underneath and
+    // triggered its own hook — safe to always call this here.
+    try{ upcPostSync(); }catch(e){ log('warn','UPC: postSync (syncNowClick) error',e.message); }
+    return result;
+  };
+  wrapped.__upcHooked = true;
+  window.syncNowClick = wrapped;
+}
 
 // -- 12. ONLINE/OFFLINE BANNER --------------------------------
 function upcOfflineBanner(show){
