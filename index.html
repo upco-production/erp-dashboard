@@ -821,6 +821,16 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <div class="nav-item" onclick="navigate('settings')">
           <div class="nav-icon">⚙</div><span class="nav-text">Settings</span>
         </div>
+        <div style="margin:8px 16px;border-top:1px solid var(--border)"></div>
+        <div class="nav-item" onclick="if(typeof closeMobileSidebar==='function')closeMobileSidebar();window.openChangePassword&&window.openChangePassword()">
+          <div class="nav-icon">🔑</div><span class="nav-text">Change Password</span>
+        </div>
+        <div class="nav-item" onclick="if(typeof closeMobileSidebar==='function')closeMobileSidebar();window.upFCM&&window.upFCM.register()">
+          <div class="nav-icon">🔔</div><span class="nav-text">Enable Notifications</span>
+        </div>
+        <div class="nav-item" onclick="if(typeof closeMobileSidebar==='function')closeMobileSidebar();window.upFCMDiagnose&&window.upFCMDiagnose()">
+          <div class="nav-icon">🧪</div><span class="nav-text">Test Notification</span>
+        </div>
         <div class="nav-item" onclick="doLogout()">
           <div class="nav-icon">🚪</div><span class="nav-text">Logout</span>
         </div>
