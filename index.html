@@ -1512,6 +1512,32 @@ function getMonthData(dept) {
 }
 function sum(arr,key){ return arr.reduce((a,b)=>a+(+b[key]||0),0); }
 function avg(arr,key){ return arr.length?sum(arr,key)/arr.length:0; }
+
+// -- SINGLE SOURCE OF TRUTH for EE%/OEE% aggregation --------------------
+// Used everywhere a group of production rows needs ONE EE%/OEE% number:
+// Dashboard, department tabs, shift/machine breakdowns, month trends, and
+// the Efficiency Center's machine table. Every row already carries its own
+// correctly-computed r.ee / r.oee (from recalcProductionRows /
+// normalizeLSBMRows); wEE()/wOEE() combine multiple rows by WEIGHTING each
+// one's EE%/OEE% by its own adjusted running minutes (eePmin/oeePmin) —
+// not a plain unweighted average. This fixes two things a plain avg() gets
+// wrong: (1) a handful of jobs with missing/zero running-minute data no
+// longer pull the number down as if they were full-weight normal jobs
+// (they contribute ~0 weight instead), and (2) combining jobs across
+// different machines/standard speeds is done by how much each job actually
+// ran, not by treating every job as equally important regardless of size.
+function wEE(rows){
+  if(!rows || !rows.length) return 0;
+  let wsum=0, w=0;
+  rows.forEach(r=>{ const min=+r.eePmin||0; if(min>0){ wsum+=(+r.ee||0)*min; w+=min; } });
+  return w>0 ? (wsum/w) : avg(rows,'ee');
+}
+function wOEE(rows){
+  if(!rows || !rows.length) return 0;
+  let wsum=0, w=0;
+  rows.forEach(r=>{ const min=+r.oeePmin||0; if(min>0){ wsum+=(+r.oee||0)*min; w+=min; } });
+  return w>0 ? (wsum/w) : avg(rows,'oee');
+}
 function fmt(n,dec=1){ return n>=1000?(n/1000).toFixed(1)+'K':n.toFixed(dec); }
 function fmtTons(n){ return n.toFixed(1); }
 
@@ -1999,8 +2025,8 @@ function renderDashboard(container) {
 
     const allDepts=['Printing','Lamination','Slitting','Bag Making'];
     const deptColors=['rgba(57,208,216,.8)','rgba(63,185,80,.8)','rgba(163,113,247,.8)','rgba(240,136,62,.8)'];
-    const eeByDeptVals=allDepts.map(dep=>parseFloat(avg(d.filter(x=>x.dept===dep),'ee').toFixed(1)));
-    const oeeByDeptVals=allDepts.map(dep=>parseFloat(avg(d.filter(x=>x.dept===dep),'oee').toFixed(1)));
+    const eeByDeptVals=allDepts.map(dep=>parseFloat(wEE(d.filter(x=>x.dept===dep)).toFixed(1)));
+    const oeeByDeptVals=allDepts.map(dep=>parseFloat(wOEE(d.filter(x=>x.dept===dep)).toFixed(1)));
     APP.chartInstances.eeDept=new Chart(document.getElementById('chart-ee-dept'),{type:'bar',data:{labels:allDepts,datasets:[{label:'EE %',data:eeByDeptVals,backgroundColor:deptColors,borderRadius:5},{label:'Target 80%',data:allDepts.map(()=>80),type:'line',borderColor:'#f0883e',borderDash:[4,4],pointRadius:0,borderWidth:1.5,backgroundColor:'transparent'}]},options:{...legendOpts,scales:{...legendOpts.scales,y:{...legendOpts.scales.y,max:100}}}});
     APP.chartInstances.oeeDept=new Chart(document.getElementById('chart-oee-dept'),{type:'bar',data:{labels:allDepts,datasets:[{label:'OEE %',data:oeeByDeptVals,backgroundColor:deptColors,borderRadius:5},{label:'Target 75%',data:allDepts.map(()=>75),type:'line',borderColor:'#f0883e',borderDash:[4,4],pointRadius:0,borderWidth:1.5,backgroundColor:'transparent'}]},options:{...legendOpts,scales:{...legendOpts.scales,y:{...legendOpts.scales.y,max:100}}}});
 
@@ -3134,11 +3160,11 @@ function renderDeptEETab(tc, dept){
   const d=getMonthData(dept);
   const months6=getLast6Months(APP.currentMonth);
   const color=deptColor(dept);
-  const eeTrend=months6.map(m=>avg(APP.productionData.filter(x=>x.month===m&&x.dept===dept),'ee'));
-  const oeeTrend=months6.map(m=>avg(APP.productionData.filter(x=>x.month===m&&x.dept===dept),'oee'));
+  const eeTrend=months6.map(m=>wEE(APP.productionData.filter(x=>x.month===m&&x.dept===dept)));
+  const oeeTrend=months6.map(m=>wOEE(APP.productionData.filter(x=>x.month===m&&x.dept===dept)));
   const machines=machineAgg(dept,d);
-  const eeByMachine=machines.map(m=>avg(m.records,'ee'));
-  const oeeByMachine=machines.map(m=>avg(m.records,'oee'));
+  const eeByMachine=machines.map(m=>wEE(m.records));
+  const oeeByMachine=machines.map(m=>wOEE(m.records));
   const isBagMaking = dept==='Bag Making';
   // For Bag Making: production in M PCS; for others: tons
   const prodTrend=isBagMaking
@@ -3263,7 +3289,7 @@ function renderMachineTab(dept){
       ${machines.map(m=>{
         const md=d.filter(r=>r.machine===m.code);
         const prod=sum(md,'production'); const waste=sum(md,'waste'); const dt=sum(md,'downtime');
-        const ee=avg(md,'ee');
+        const ee=wEE(md);
         return `<div class="machine-card">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
             <div><div style="font-weight:600;font-size:13px">${m.name}</div><div style="font-size:10px;color:var(--text3)">${m.code}</div></div>
@@ -3294,7 +3320,7 @@ function renderShiftTab(dept){
           ${shifts.map(s=>{
             const sd=d.filter(r=>r.shift===s);
             const prod=sum(sd,'production'); const waste=sum(sd,'waste');
-            const ee=avg(sd,'ee'); const oee=avg(sd,'oee'); const dt=sum(sd,'downtime');
+            const ee=wEE(sd); const oee=wOEE(sd); const dt=sum(sd,'downtime');
             const wp=prod>0?(waste/prod)*100:0;
             return `<tr>
               <td><span class="badge badge-blue">${s}</span></td>
@@ -3430,10 +3456,10 @@ function renderEfficiency(container){
   const d=APP.productionData.filter(x=>x.month===APP.currentMonth&&x.dept!=='Bag Making');
   const months6=getLast6Months(APP.currentMonth);
   const depts=['Printing','Lamination','Slitting'];
-  const eeByDept=depts.map(dep=>avg(d.filter(x=>x.dept===dep),'ee').toFixed(1));
-  const oeeByDept=depts.map(dep=>avg(d.filter(x=>x.dept===dep),'oee').toFixed(1));
-  const eeTrend=months6.map(m=>avg(APP.productionData.filter(x=>x.month===m&&x.dept!=='Bag Making'),'ee').toFixed(1));
-  const oeeTrend=months6.map(m=>avg(APP.productionData.filter(x=>x.month===m&&x.dept!=='Bag Making'),'oee').toFixed(1));
+  const eeByDept=depts.map(dep=>wEE(d.filter(x=>x.dept===dep)).toFixed(1));
+  const oeeByDept=depts.map(dep=>wOEE(d.filter(x=>x.dept===dep)).toFixed(1));
+  const eeTrend=months6.map(m=>wEE(APP.productionData.filter(x=>x.month===m&&x.dept!=='Bag Making')).toFixed(1));
+  const oeeTrend=months6.map(m=>wOEE(APP.productionData.filter(x=>x.month===m&&x.dept!=='Bag Making')).toFixed(1));
   
   container.innerHTML=`
     <div class="stats-row">
@@ -3465,7 +3491,7 @@ function renderEfficiency(container){
       <table><thead><tr><th>Machine</th><th>Dept</th><th>Records</th><th>Avg EE%</th><th>Avg OEE%</th><th>Total DT (min)</th><th>Utilization</th></tr></thead>
       <tbody>${APP.machines.filter(m=>m.dept!=='Bag Making'&&m.dept!=='Ink'&&m.dept!=='Quality').map(m=>{
         const md=d.filter(r=>r.machine===m.code);
-        const ee=avg(md,'ee').toFixed(1); const oee=avg(md,'oee').toFixed(1); const dt=sum(md,'downtime');
+        const ee=wEE(md).toFixed(1); const oee=wOEE(md).toFixed(1); const dt=sum(md,'downtime');
         const util=(Math.random()*30+60).toFixed(1);
         return `<tr><td style="font-weight:500">${m.name}</td><td>${m.dept}</td><td>${md.length}</td>
           <td style="color:${ee>=75?'var(--green)':'var(--yellow)'}">${ee}%</td>
@@ -3580,8 +3606,8 @@ function renderEffCenterDept(dept){
     return;
   }
   
-  const deptEE = avg(d,'ee').toFixed(1);
-  const deptOEE = avg(d,'oee').toFixed(1);
+  const deptEE = wEE(d).toFixed(1);
+  const deptOEE = wOEE(d).toFixed(1);
   const totalProd = sum(d,'production');
   const totalWaste = sum(d,'waste');
   const totalDT = sum(d,'downtime');
@@ -3591,7 +3617,7 @@ function renderEffCenterDept(dept){
   const unit = dept==='Bag Making'?'PCS':'KG';
   
   // Machine EE/OEE
-  const machEE = machines.map(m=>({code:m.code,ee:avg(d.filter(r=>r.machine===m.code),'ee'),oee:avg(d.filter(r=>r.machine===m.code),'oee')}));
+  const machEE = machines.map(m=>({code:m.code,ee:wEE(d.filter(r=>r.machine===m.code)),oee:wOEE(d.filter(r=>r.machine===m.code))}));
   const shifts=['A','B','C'];
   
   // Gauge CSS for EE/OEE
@@ -3719,8 +3745,8 @@ function renderEffCenterDept(dept){
     if(document.getElementById('ec-mach-waste')) APP.chartInstances.ecMachWaste=new Chart(document.getElementById('ec-mach-waste'),{type:'bar',data:{labels:machLabels,datasets:[{label:'Waste %',data:machWasteVals,backgroundColor:machWasteVals.map(v=>v>5?'rgba(248,81,73,.8)':'rgba(63,185,80,.8)'),borderRadius:4}]},options:cBase});
     if(document.getElementById('ec-shift-chart')){
       const shiftLabels=['Shift A','Shift B','Shift C'];
-      const shiftEE=shifts.map(s=>parseFloat(avg(d.filter(r=>r.shift===s),'ee').toFixed(1)));
-      const shiftOEE=shifts.map(s=>parseFloat(avg(d.filter(r=>r.shift===s),'oee').toFixed(1)));
+      const shiftEE=shifts.map(s=>parseFloat(wEE(d.filter(r=>r.shift===s)).toFixed(1)));
+      const shiftOEE=shifts.map(s=>parseFloat(wOEE(d.filter(r=>r.shift===s)).toFixed(1)));
       const shiftWaste=shifts.map(s=>{const sd=d.filter(r=>r.shift===s);const p=sum(sd,'production');const w=sum(sd,'waste');return p>0?parseFloat((w/p*100).toFixed(2)):0;});
       const shiftDT=shifts.map(s=>parseFloat((sum(d.filter(r=>r.shift===s),'downtime')/60).toFixed(1)));
       APP.chartInstances.ecShift=new Chart(document.getElementById('ec-shift-chart'),{type:'bar',data:{labels:shiftLabels,datasets:[{label:'EE%',data:shiftEE,backgroundColor:'rgba(57,208,216,.8)',borderRadius:3},{label:'OEE%',data:shiftOEE,backgroundColor:'rgba(63,185,80,.8)',borderRadius:3},{label:'Waste%',data:shiftWaste,backgroundColor:'rgba(248,81,73,.8)',borderRadius:3},{label:'DT(h)',data:shiftDT,backgroundColor:'rgba(240,136,62,.8)',borderRadius:3}]},options:{...cBase,plugins:{legend:{display:true,labels:{color:'#8b949e',font:{size:10},boxWidth:10,padding:8}},upValueLabels:{enabled:true}}}});
@@ -5854,7 +5880,7 @@ function renderAllDataDept(){
     <tbody>${depts.map(dep=>{
       const d=APP.productionData.filter(x=>x.dept===dep);
       const prod=sum(d,'production'); const waste=sum(d,'waste'); const dt=sum(d,'downtime');
-      const ee=avg(d,'ee').toFixed(1); const oee=avg(d,'oee').toFixed(1);
+      const ee=wEE(d).toFixed(1); const oee=wOEE(d).toFixed(1);
       return `<tr>
         <td><span class="dept-dot" style="background:${deptColor(dep)}"></span><b>${dep}</b></td>
         <td>${d.length}</td>
@@ -6987,8 +7013,8 @@ function buildMachineCalcRows(month){
     // by hand from the Average Speed / Standard Speed columns next to it).
     const ee = (avgSpeed>0 && standardSpeed>0)
       ? (avgSpeed/standardSpeed)*100
-      : (records ? avg(rows,'ee') : 0);
-    const oee = records ? avg(rows,'oee') : 0;
+      : (records ? wEE(rows) : 0);
+    const oee = records ? wOEE(rows) : 0;
     const codeKey = String(m.code||'').trim().toUpperCase();
     const effectiveFactorEE = machineFactorsEE[codeKey]!==undefined ? +machineFactorsEE[codeKey] : globalRatio;
     const effectiveFactorOEE = machineFactorsOEE[codeKey]!==undefined ? +machineFactorsOEE[codeKey] : globalOeeRatio;
@@ -8859,7 +8885,7 @@ function renderDeptKPICharts(dept){
   tc.innerHTML=`<div class="kpi-grid">${fields.map((x,i)=>`<div class="kpi-card ${['cyan','green','orange','purple','red','pink'][i%6]}"><div class="kpi-value">${deptKPIValue(x,d)}</div><div class="kpi-label">${x.toUpperCase()}</div></div>`).join('')}</div><div class="charts-grid"><div class="chart-card"><div class="chart-header"><div class="chart-title">${dept} KPI Trend</div></div><div class="chart-wrap"><canvas id="dept-kpi-trend"></canvas></div></div></div>`;
   setTimeout(()=>{const months=getLast6Months(APP.currentMonth); APP.chartInstances.deptKpi=new Chart(document.getElementById('dept-kpi-trend'),{type:'line',data:{labels:months,datasets:[{label:'Production',data:months.map(m=>sum(APP.productionData.filter(r=>r.month===m&&r.dept===dept),'production')),borderColor:deptColor(dept),backgroundColor:deptColor(dept)+'22',fill:true,tension:.35}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8b949e'},upValueLabels:{enabled:true}}},scales:{x:{ticks:{color:'#6e7681'}},y:{ticks:{color:'#6e7681'}}}}});},50);
 }
-function deptKPIValue(x,d){ const prod=sum(d,'production'), w=sum(d,'waste'); if(x.includes('meters')) return d.reduce((a,r)=>a+deptMeters(r),0).toLocaleString(); if(x.includes('setting')) return d.reduce((a,r)=>a+deptJobSetting(r),0); if(x.includes('approval')) return (d.reduce((a,r)=>a+numValue(r,['APPROVAL_WASTE','APPROVAL_WASTAGE_KG','approvalWaste'],0),0)/Math.max(prod,1)*100).toFixed(2)+'%'; if(x.includes('wastage')) return (w/Math.max(prod,1)*100).toFixed(2)+'%'; if(x.includes('downtime')) return sum(d,'downtime')+'m'; if(x.includes('OEE')) return avg(d,'oee').toFixed(1)+'%'; if(x.includes('EE')) return avg(d,'ee').toFixed(1)+'%'; return prod.toFixed(1); }
+function deptKPIValue(x,d){ const prod=sum(d,'production'), w=sum(d,'waste'); if(x.includes('meters')) return d.reduce((a,r)=>a+deptMeters(r),0).toLocaleString(); if(x.includes('setting')) return d.reduce((a,r)=>a+deptJobSetting(r),0); if(x.includes('approval')) return (d.reduce((a,r)=>a+numValue(r,['APPROVAL_WASTE','APPROVAL_WASTAGE_KG','approvalWaste'],0),0)/Math.max(prod,1)*100).toFixed(2)+'%'; if(x.includes('wastage')) return (w/Math.max(prod,1)*100).toFixed(2)+'%'; if(x.includes('downtime')) return sum(d,'downtime')+'m'; if(x.includes('OEE')) return wOEE(d).toFixed(1)+'%'; if(x.includes('EE')) return wEE(d).toFixed(1)+'%'; return prod.toFixed(1); }
 function renderDeptDowntime(dept){ const d=getMonthData(dept); document.getElementById('dept-tab-content').innerHTML=`<div class="table-card"><div class="table-header"><div class="table-title">Downtime Breakdown - ${dept}</div></div><table><thead><tr><th>Machine</th><th>Process</th><th>Mechanical</th><th>Electrical</th><th>Utilities</th><th>PM</th><th>Total Technical</th><th>Planning</th><th>Unplanned</th></tr></thead><tbody>${[...new Set(d.map(r=>r.machine))].map(m=>{const md=d.filter(r=>r.machine===m);const t=sum(md,'downtime');return `<tr><td>${m}</td><td>${Math.round(t*.2)}</td><td>${Math.round(t*.25)}</td><td>${Math.round(t*.15)}</td><td>${Math.round(t*.1)}</td><td>${Math.round(t*.1)}</td><td style="color:var(--orange);font-weight:600">${t}</td><td>${Math.round(t*.12)}</td><td>${Math.round(t*.08)}</td></tr>`}).join('')}</tbody></table></div>`; }
 const _origRenderQuality = renderQuality;
 renderQuality = function(container){
@@ -9006,8 +9032,8 @@ function buildDeptRequirementKPIs(dept,data){
   const techDT=data.reduce((a,r)=>a+deptTechDowntime(r),0);
   const appWaste=data.reduce((a,r)=>a+deptApprovalWaste(r),0);
   const appWastePct=waste? appWaste/waste*100:0;
-  const ee=avg(data,'ee');
-  const oee=avg(data,'oee');
+  const ee=wEE(data);
+  const oee=wOEE(data);
   const isBag=dept==='Bag Making';
   // Production: Bag Making → M PCS; all others → Tons (÷1000)
   const prodValue=isBag?(prod/1000000).toFixed(2)+' M':(prod/1000).toFixed(2)+' T';
@@ -9045,7 +9071,7 @@ function machineAgg(dept,data){
     const masterEntry = APP.machines.find(m=>m.code===code);
     return {code, display:deptMachineDisplay(code,dept), records:md,
             production:prod, productionTons, waste, downtime:dt,
-            ee:avg(md,'ee'), oee:avg(md,'oee'),
+            ee:wEE(md), oee:wOEE(md),
             inactive: masterEntry ? masterEntry.status==='INACTIVE' : false,
             jobSetting:md.reduce((a,r)=>a+deptJobSetting(r),0)};
   });
@@ -9117,8 +9143,8 @@ renderDeptPage=function(container,dept){
   const waste=sum(data,'waste');
   const wasteP=prod>0?(waste/prod*100):0;
   const dt=sum(data,'downtime');
-  const eeA=avg(data,'ee');
-  const oeeA=avg(data,'oee');
+  const eeA=wEE(data);
+  const oeeA=wOEE(data);
   const meters=data.reduce((a,r)=>a+(+r.productionMeter||+r.PRODUCTION_METER||0),0);
   const dispProd=isBag?Math.round(prod).toLocaleString()+' PCS':(prod/1000).toFixed(2)+' T';
   const dispM=Math.round(+(meters||0)).toLocaleString()+' m';
@@ -9152,7 +9178,7 @@ switchDeptTab=function(tab,el,dept){
     const isBag=dept==='Bag Making';
     const prod=sum(data,'production'); const waste=sum(data,'waste');
     const wasteP=prod>0?(waste/prod*100):0; const dt=sum(data,'downtime');
-    const eeA=avg(data,'ee'); const oeeA=avg(data,'oee');
+    const eeA=wEE(data); const oeeA=wOEE(data);
     const meters=data.reduce((a,r)=>a+(+r.productionMeter||+r.PRODUCTION_METER||0),0);
     const dispProd=isBag?Math.round(prod).toLocaleString()+' PCS':(prod/1000).toFixed(2)+' T';
     const dispM=Math.round(+(meters||0)).toLocaleString()+' m';
@@ -12989,8 +13015,8 @@ navigate = (function(orig){
     const prodKgTotal=data.reduce((a,r)=>a+n(pick(r,['productionKg','PRODUCTION_KG','production'],0)),0);
     const wastePct=dept==='Printing' ? (prodKgTotal ? (techWaste/prodKgTotal)*100 : 0) : (prod ? (waste/prod)*100 : 0);
     const techDT=data.reduce((a,r)=>a+rowTechDT(r),0);
-    const ee=avg(data,'ee');
-    const oee=avg(data,'oee');
+    const ee=wEE(data);
+    const oee=wOEE(data);
     const isBag=dept==='Bag Making';
     // Production: Bag Making → M PCS; all others → Tons (÷1000)
     const prodValue=isBag?(prod/1000000).toFixed(2)+' M':(prod/1000).toFixed(2)+' T';
@@ -13212,8 +13238,8 @@ navigate = (function(orig){
     const meterTotal=data.reduce((a,r)=>a+(typeof deptMeters==='function'?deptMeters(r):meters(r)),0);
     const waste=data.reduce((a,r)=>a+actualWasteKg(r),0);
     const tech=data.reduce((a,r)=>a+techDT(r),0);
-    const ee=avg(data,'ee');
-    const oee=avg(data,'oee');
+    const ee=wEE(data);
+    const oee=wOEE(data);
     let replacement;
     if(dept==='Lamination') replacement={label:'TOTAL ADHESIVE CONSUMED KG', value:kg1(data.reduce((a,r)=>a+actualAdhesiveKg(r),0)), sub:'Actual adhesive consumed', color:'orange'};
     else if(dept==='Slitting'){
