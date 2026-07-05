@@ -1,9 +1,20 @@
 // ============================================================
-// firebase-messaging-sw.js — UP ERP v2.0
+// firebase-messaging-sw.js — UP ERP v2.1
 // Universal Packaging ERP — FCM Service Worker
 //
 // DEPLOY: Same directory as index.html (web server root)
 // Must be served from same origin.
+//
+// CHANGELOG v2.1:
+//   + Removed the manual self.addEventListener('push', ...) fallback.
+//     firebase-messaging-compat.js's messaging.onBackgroundMessage()
+//     ALREADY registers its own internal 'push' listener and fully
+//     handles incoming FCM pushes. Having a second, separate 'push'
+//     listener meant two independent handlers were both trying to call
+//     showNotification() for the same event — this is exactly why FCM
+//     was reporting a successful send (HTTP 200, message accepted) while
+//     no notification actually appeared on the device: the two competing
+//     handlers interfered with each other instead of one cleanly winning.
 //
 // Features:
 //   - Rich lock screen notifications (like WhatsApp)
@@ -105,6 +116,12 @@ function buildNotification(d, n) {
 }
 
 // ── Background message handler ────────────────────────────────
+// This is the ONLY handler needed — firebase-messaging-compat.js wires
+// this up to the service worker's 'push' event internally. Do NOT also
+// add a separate self.addEventListener('push', ...) — that creates two
+// competing handlers for the same event and can silently prevent any
+// notification from showing at all, even though FCM reports a
+// successful send.
 messaging.onBackgroundMessage(function(payload) {
   console.log('[SW] Background push:', payload);
 
@@ -192,4 +209,4 @@ self.addEventListener('notificationclick', function(event) {
 self.addEventListener('install',  () => self.skipWaiting());
 self.addEventListener('activate', e  => e.waitUntil(clients.claim()));
 
-console.log('[SW] UP ERP firebase-messaging-sw.js v2.0 loaded');
+console.log('[SW] UP ERP firebase-messaging-sw.js v2.1 loaded');
