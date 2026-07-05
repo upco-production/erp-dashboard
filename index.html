@@ -20074,6 +20074,7 @@ async function sofBgMaintRefresh(force){
     _bgRunning = false;
   }
 }
+window.sofBgMaintRefresh = sofBgMaintRefresh; // expose — used by pull-to-refresh and notification-tap handler
 
 // -- "Last synced X ago" indicator update ------------------------------------
 function sofUpdateAgo(){
