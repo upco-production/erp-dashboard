@@ -12,7 +12,7 @@
 <!-- V31: Full mobile responsive overhaul - slide-over sidebar drawer, backdrop, 768px/480px breakpoints, KPI 2-col, charts single-col, tables scroll, settings stack, login box fluid, header compact on mobile -->
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <noscript><link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"></noscript>
-<link id="app-favicon" rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏭</text></svg>">
+<link id="app-favicon" rel="icon" type="image/png" href="upco-logo-sq.png" onerror="this.href=&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%AD%3C/text%3E%3C/svg%3E&quot;">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" onerror="window.__CHART_LOAD_FAILED=true;"></script>
 <script>
 // -- OFFLINE SAFETY NET ---------------------------------------------------
@@ -363,7 +363,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 
 /* LOGIN */
 #login-page{position:fixed;inset:0;background:var(--bg);z-index:1000;display:flex;align-items:center;justify-content:center}
-.login-bg{position:absolute;inset:0;background:radial-gradient(ellipse 60% 60% at 50% 50%,rgba(31,111,235,.08),transparent);background-size:cover;background-position:center;transition:opacity .5s}
+.login-bg{position:absolute;inset:0;background:url('upcobackground.png') center/cover no-repeat,radial-gradient(ellipse 60% 60% at 50% 50%,rgba(31,111,235,.08),transparent);background-size:cover;background-position:center;transition:opacity .5s}
 .login-bg-overlay{position:absolute;inset:0;background:rgba(0,0,0,.55);z-index:0}
 .login-box{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:40px;width:380px;position:relative;z-index:1}
 .login-logo{display:flex;align-items:center;gap:14px;margin-bottom:32px}
@@ -8374,6 +8374,9 @@ function prLogoSVG(){
 
 // Builds the full colorful HTML report (used for both the modal preview
 // and the PDF/Excel export — single source of truth for layout+numbers).
+// Colorful dark-theme report — used for the live preview modal AND the PDF
+// download. Unchanged from before; the black-font / light-grey-blank /
+// row-19-summary layout below is Excel-only, per explicit request.
 function prBuildReportHTML(monthKey){
   const {days, totals} = prBuildRows(monthKey);
   const C = PR_DEPT_COLORS;
@@ -8467,6 +8470,107 @@ function prBuildReportHTML(monthKey){
   </div>`;
 }
 
+function prBuildExcelReportHTML(monthKey){
+  const {days, totals} = prBuildRows(monthKey);
+  const C = PR_DEPT_COLORS;
+  const BLACK = '#000000';
+  const LIGHT_GREY = '#e8e8e8';
+  const groupHead = (label,color,span)=>`<th colspan="${span}" style="background:${color};color:${BLACK};font-weight:800;padding:8px 6px;font-size:11px;text-align:center;border:1px solid #999">${label}</th>`;
+  const subHead = txt=>`<th style="background:#f0f0f0;color:${BLACK};padding:6px;font-size:10px;text-align:center;border:1px solid #999">${txt}</th>`;
+  // All text is black per spec - only background tints distinguish
+  // departments/blank-vs-data, never font colour.
+  const cell = (v,dec,bg)=>`<td style="padding:5px 6px;text-align:right;font-size:11px;font-weight:600;color:${BLACK};border:1px solid #999;background:${bg||'#ffffff'}">${prNum(v,dec==null?1:dec)}</td>`;
+  // Blank/empty numeric cell - light grey background, per spec.
+  const blankCell = ()=>`<td style="padding:5px 6px;text-align:center;font-size:11px;color:${BLACK};border:1px solid #999;background:${LIGHT_GREY}">-</td>`;
+
+  const rowsHTML = days.map(d=>{
+    // No-data days: light grey (blank), same as any other empty cell.
+    const rowBg = d.hasData ? '#ffffff' : LIGHT_GREY;
+    return `
+    <tr>
+      <td style="padding:5px 8px;font-size:11px;font-weight:700;color:${BLACK};border:1px solid #999;background:${rowBg}">${prFmtDate(d.iso)}</td>
+      ${cell(d.printMeter,0,rowBg)}${cell(d.printTon,2,rowBg)}
+      ${cell(d.lamMeter,0,rowBg)}${cell(d.lamTon,2,rowBg)}
+      ${cell(d.slitMeter,0,rowBg)}${cell(d.slitTon,2,rowBg)}
+      ${cell(d.bmTon,2,rowBg)}${cell(d.bmPcs,0,rowBg)}
+      ${cell(d.dispUP,2,rowBg)}${cell(d.dispUF,2,rowBg)}${cell(d.dispExport,2,rowBg)}${cell(d.dispBagPouch,0,rowBg)}
+    </tr>`;
+  }).join('') || `<tr><td colspan="13" style="text-align:center;padding:20px;color:${BLACK};border:1px solid #999;background:${LIGHT_GREY}">No production/dispatch data for ${monthKey}</td></tr>`;
+
+  // Grand Total: bold, larger font, highlighted background (text stays black).
+  const gtCell = (v,dec)=>`<td style="padding:9px 6px;text-align:right;font-size:14px;font-weight:800;color:${BLACK};border:1px solid #999">${prNum(v,dec==null?1:dec)}</td>`;
+  const grandTotalHTML = `
+    <tr style="background:#bcd6f7">
+      <td style="padding:9px 8px;font-size:14px;font-weight:800;color:${BLACK};border:1px solid #999">GRAND TOTAL</td>
+      ${gtCell(totals.printMeter,0)}${gtCell(totals.printTon,2)}
+      ${gtCell(totals.lamMeter,0)}${gtCell(totals.lamTon,2)}
+      ${gtCell(totals.slitMeter,0)}${gtCell(totals.slitTon,2)}
+      ${gtCell(totals.bmTon,2)}${gtCell(totals.bmPcs,0)}
+      ${gtCell(totals.dispUP,2)}${gtCell(totals.dispUF,2)}${gtCell(totals.dispExport,2)}${gtCell(totals.dispBagPouch,0)}
+    </tr>`;
+
+  // -- Per-department KPI summary row, right under the title (2 rows:
+  // label row + value row), each showing that department's Grand Total.
+  const kLabel = (label,color)=>`<td style="padding:8px 6px;text-align:center;font-size:11px;font-weight:800;color:${BLACK};background:${color};border:1px solid #999">${label}</td>`;
+  const kValue = (line1,line2)=>`<td style="padding:8px 6px;text-align:center;font-size:12px;font-weight:700;color:${BLACK};background:#ffffff;border:1px solid #999">${line1}${line2?`<br><span style="font-size:9px;font-weight:500">${line2}</span>`:''}</td>`;
+
+  // -- Build the WHOLE report as ONE table, tracking real row numbers, so
+  // the new Production Summary block can be placed at an exact row (19)
+  // regardless of anything above it - Excel only gets predictable row
+  // numbers from actual <tr> elements, not from styled <div> blocks.
+  const rows = [];
+  rows.push(`<tr><td colspan="13" style="text-align:center;padding:10px;font-size:20px;font-weight:800;color:${BLACK};border:1px solid #999">📊 PRODUCTION REPORT</td></tr>`); // row 1
+  rows.push(`<tr><td colspan="13" style="text-align:center;padding:6px;font-size:12px;font-weight:600;color:${BLACK};border:1px solid #999">Universal Packaging Pvt. Ltd. &nbsp;·&nbsp; Period: ${monthKey}</td></tr>`); // row 2
+  rows.push(`<tr><td colspan="13" style="padding:4px;border:1px solid #999;background:${LIGHT_GREY}">&nbsp;</td></tr>`); // row 3 (spacer)
+  rows.push(`<tr>${kLabel('PRINTING',C.printing)}${kLabel('LAMINATION',C.lamination)}${kLabel('SLITTING',C.slitting)}${kLabel('BAG MAKING',C.bagmaking)}${kLabel('DISPATCH',C.dispatch)}<td colspan="8" style="border:1px solid #999;background:${LIGHT_GREY}">&nbsp;</td></tr>`); // row 4
+  rows.push(`<tr>${kValue(prNum(totals.printTon,2)+' Ton','Meter: '+prNum(totals.printMeter,0))}${kValue(prNum(totals.lamTon,2)+' Ton','Meter: '+prNum(totals.lamMeter,0))}${kValue(prNum(totals.slitTon,2)+' Ton','Meter: '+prNum(totals.slitMeter,0))}${kValue(prNum(totals.bmTon,2)+' Ton','Pcs: '+prNum(totals.bmPcs,0))}${kValue(prNum(totals.dispUP+totals.dispUF+totals.dispExport,2)+' Ton','Bag/Pouch: '+prNum(totals.dispBagPouch,0))}<td colspan="8" style="border:1px solid #999;background:${LIGHT_GREY}">&nbsp;</td></tr>`); // row 5
+
+  // Pad blank spacer rows so the Production Summary block below always
+  // lands on row 19, no matter what's above (rows.length is the count of
+  // rows written so far; we need (19-1) rows total before the summary
+  // header, i.e. pad up through row 18).
+  while(rows.length < 18){
+    rows.push(`<tr><td colspan="13" style="padding:4px;border:1px solid #999;background:${LIGHT_GREY}">&nbsp;</td></tr>`);
+  }
+
+  // -- ROW 19: Production Summary block (Tons / Meters / Pcs by dept) ------
+  const sumHead = txt=>`<th style="background:#dfe6ee;color:${BLACK};font-weight:800;padding:7px 6px;font-size:11px;text-align:center;border:1px solid #999">${txt}</th>`;
+  rows.push(`<tr>${sumHead('')}${sumHead('PRINTING')}${sumHead('LAMINATION')}${sumHead('SLITTING')}${sumHead('BAG MAKING')}${sumHead('DISPATCH')}<td colspan="7" style="border:1px solid #999;background:${LIGHT_GREY}">&nbsp;</td></tr>`); // row 19
+  const sumLabel = txt=>`<td style="padding:7px 8px;font-size:11px;font-weight:700;color:${BLACK};border:1px solid #999;background:#ffffff">${txt}</td>`;
+  rows.push(`<tr>${sumLabel('PRODUCTION TONS')}${cell(totals.printTon,2)}${cell(totals.lamTon,2)}${cell(totals.slitTon,2)}${cell(totals.bmTon,2)}${cell(totals.dispUP+totals.dispUF+totals.dispExport,2)}<td colspan="7" style="border:1px solid #999;background:${LIGHT_GREY}">&nbsp;</td></tr>`); // row 20
+  rows.push(`<tr>${sumLabel('PRODUCTION METERS')}${cell(totals.printMeter,0)}${cell(totals.lamMeter,0)}${cell(totals.slitMeter,0)}${blankCell()}${blankCell()}<td colspan="7" style="border:1px solid #999;background:${LIGHT_GREY}">&nbsp;</td></tr>`); // row 21 - Bag Making/Dispatch have no meter figure
+  rows.push(`<tr>${sumLabel('PRODUCTION PCS')}${blankCell()}${blankCell()}${blankCell()}${cell(totals.bmPcs,0)}${cell(totals.dispBagPouch,0)}<td colspan="7" style="border:1px solid #999;background:${LIGHT_GREY}">&nbsp;</td></tr>`); // row 22 - only Bag Making/Dispatch report pieces
+  rows.push(`<tr><td colspan="13" style="padding:4px;border:1px solid #999;background:${LIGHT_GREY}">&nbsp;</td></tr>`); // row 23 (spacer)
+
+  // -- Daily date-wise table (group header + sub header + data rows) ------
+  rows.push(`<tr>
+    <th rowspan="2" style="background:#dfe6ee;color:${BLACK};font-weight:800;padding:8px;font-size:11px;border:1px solid #999">DATE</th>
+    ${groupHead('PRINTING',C.printing,2)}
+    ${groupHead('LAMINATION',C.lamination,2)}
+    ${groupHead('SLITTING',C.slitting,2)}
+    ${groupHead('BAG MAKING',C.bagmaking,2)}
+    ${groupHead('DISPATCH',C.dispatch,4)}
+  </tr>`);
+  rows.push(`<tr>
+    ${subHead('Meter')}${subHead('Ton')}
+    ${subHead('Meter')}${subHead('Ton')}
+    ${subHead('Meter')}${subHead('Ton')}
+    ${subHead('Ton')}${subHead('Pcs')}
+    ${subHead('UP Ton')}${subHead('UF Ton')}${subHead('Export Qty')}${subHead('Bag/Pouch')}
+  </tr>`);
+  rows.push(rowsHTML);
+  rows.push(grandTotalHTML);
+
+  return `
+  <div style="font-family:Inter,Arial,sans-serif;background:#ffffff;padding:16px;border-radius:10px">
+    <table style="border-collapse:collapse;width:100%;min-width:1100px">
+      <tbody>${rows.join('')}</tbody>
+    </table>
+    <div style="margin-top:10px;font-size:9px;color:${BLACK}">Generated ${new Date().toLocaleString('en-PK')} · Universal Packaging ERP</div>
+    <div style="margin-top:4px;font-size:8px;color:${BLACK};font-style:italic">Note: This is a system-generated report. Minor discrepancies may occur.</div>
+  </div>`;
+}
+
 function prAvailableMonths(){
   const months = new Set();
   (APP.productionData||[]).forEach(r=>{ if(r.month) months.add(r.month); });
@@ -8523,7 +8627,7 @@ window.prDownloadPDF = function(){
 // layout as the PDF (single source of truth).
 window.prDownloadExcel = function(){
   const month = document.getElementById('pr-month-select')?.value || APP.currentMonth;
-  const html = prBuildReportHTML(month);
+  const html = prBuildExcelReportHTML(month);
   const doc = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
     <head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>
     <x:Name>Production Report</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
@@ -11405,10 +11509,17 @@ const order=['SYSTEM_MASTER','MASTER_DATA','PLANNING','WIP'];
                                .map(r=>{ try{ return upNormalizeProductionByTab(r,r.__DEPT+'_IMPORT'); }catch(e){ return r; } });
         setSourceStatus('PRINTING','OK',APP.productionData.length);
         // COVERAGE TRACKING: one full sync covers everything from _from2
-        // (6 months back) to today. selectMonth uses this to skip re-fetch
-        // for any month already inside the synced window.
+        // (6 months back) to TODAY (the day this sync actually ran).
+        // selectMonth uses BOTH bounds to skip re-fetch only for a month
+        // truly inside the synced window — previously only the 'from'
+        // bound was checked, so a sync done in June kept marking July (or
+        // any later month) as "already covered" forever after, even though
+        // July was never actually fetched — silently showing June's cached
+        // rows under the July view instead of fetching fresh data.
+        const _todayForCoverage = (function(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
         APP.syncedFromDate = _from2;
-        try{ localStorage.setItem('up_synced_from', JSON.stringify({from:_from2, at:Date.now()})); }catch(e){}
+        APP.syncedToDate = _todayForCoverage;
+        try{ localStorage.setItem('up_synced_from', JSON.stringify({from:_from2, to:_todayForCoverage, at:Date.now()})); }catch(e){}
         debugLog('ok','All INCHARGE synced','P:'+APP.productionData.length+' Ink:'+APP.inkData.length+' Q:'+APP.ncrData.length+' D:'+APP.dispatchData.length);
       } else {
         debugLog('warn','INCHARGE returned 0 rows',JSON.stringify(_idata.counts||_idata.errors||{}));
@@ -12425,9 +12536,9 @@ navigate = (function(orig){
                    APP.productionData.some(function(r){ return r.month === m; });
 
     // -- COVERAGE CHECK: agar yeh month already synced window ke andar hai
-    // (full sync = 6 months back → today), toh dobara fetch ki zaroorat
-    // NAHIN — chaahe us month mein zero rows hon (genuinely no data).
-    // Coverage 60 min tak valid (UPC 1-hour cache ke saath aligned).
+    // (full sync = 6 months back → sync's own today), toh dobara fetch ki
+    // zaroorat NAHIN — chaahe us month mein zero rows hon (genuinely no
+    // data). Coverage 60 min tak valid (UPC cache ke saath aligned).
     var monthCovered = (function(){
       try{
         var _p = String(m).match(/^([A-Za-z]{3})-(\d{2})$/);
@@ -12439,11 +12550,17 @@ navigate = (function(orig){
         var monthEndGuard = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-01';
         if(monthStart > monthEndGuard) return false; // future months are never covered
         var from = APP.syncedFromDate || '';
-        if(!from){
+        var to = APP.syncedToDate || '';
+        if(!from || !to){
           var saved = JSON.parse(localStorage.getItem('up_synced_from')||'null');
-          if(saved && saved.from && (Date.now()-(saved.at||0)) <= 60*60*1000) from = saved.from;
+          if(saved && saved.from && (Date.now()-(saved.at||0)) <= 60*60*1000){ from = saved.from; to = saved.to||''; }
         }
-        return !!from && monthStart >= from;
+        // Requested month must be BOTH inside the 6-month lookback window
+        // AND no later than the day that sync actually ran — a sync done
+        // in June cannot claim July is "covered" just because July's start
+        // date happens to be after the 6-months-back 'from' boundary.
+        if(!to) return false; // no upper bound on record → don't assume covered
+        return !!from && monthStart >= from && monthStart <= to;
       }catch(e){ return false; }
     })();
 
