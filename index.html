@@ -1305,7 +1305,7 @@ function doLogin() {
   document.getElementById('main-app').style.display='flex';
   document.getElementById('sidebar-username').textContent=user.name;
   document.getElementById('sidebar-role').textContent=(user.role||'').replace(/_/g,' ');
-  document.getElementById('user-role-badge').textContent=(user.role||'').replace(/_/g,' ');
+  { const _urb=document.getElementById('user-badge-role'); if(_urb) _urb.textContent=(user.role||'').replace(/_/g,' '); }
   const _sNav=document.getElementById('nav-settings-item'); if(_sNav) _sNav.style.display=(user.role==='MAIN_ADMIN')?'':'none';
   // Build month chips
   buildMonthChips();
@@ -21374,7 +21374,7 @@ function upcHookLogin(){
         try{ document.getElementById('main-app').style.display='flex'; }catch(e){}
         try{ document.getElementById('sidebar-username').textContent = cachedUser.name||cachedUser.username; }catch(e){}
         try{ document.getElementById('sidebar-role').textContent = String(APP.currentUser.role||'').replace(/_/g,' '); }catch(e){}
-        try{ document.getElementById('user-role-badge').textContent = String(APP.currentUser.role||'').replace(/_/g,' '); }catch(e){}
+        try{ const _urb=document.getElementById('user-badge-role'); if(_urb) _urb.textContent = String(APP.currentUser.role||'').replace(/_/g,' '); }catch(e){}
         try{ buildMonthChips(); }catch(e){}
         try{ startClock(); }catch(e){}
         try{ restoreSessionState(); }catch(e){}
@@ -21420,7 +21420,7 @@ function upcHookLogin(){
         try{ document.getElementById('main-app').style.display='flex'; }catch(e){}
         try{ document.getElementById('sidebar-username').textContent = cachedUser2.name||cachedUser2.username; }catch(e){}
         try{ document.getElementById('sidebar-role').textContent = String(APP.currentUser.role||'').replace(/_/g,' '); }catch(e){}
-        try{ document.getElementById('user-role-badge').textContent = String(APP.currentUser.role||'').replace(/_/g,' '); }catch(e){}
+        try{ const _urb=document.getElementById('user-badge-role'); if(_urb) _urb.textContent = String(APP.currentUser.role||'').replace(/_/g,' '); }catch(e){}
         try{ buildMonthChips(); }catch(e){}
         try{ startClock(); }catch(e){}
         try{ restoreSessionState(); }catch(e){}
@@ -21610,7 +21610,7 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
           // Update sidebar
           var su = document.getElementById('sidebar-username');
           var sr = document.getElementById('sidebar-role');
-          var ub = document.getElementById('user-role-badge');
+          var ub = document.getElementById('user-badge-role');
           if(su) su.textContent = matched.name || matched.username;
           if(sr) sr.textContent = (matched.role||'').replace(/_/g,' ');
           if(ub) ub.textContent = (matched.role||'').replace(/_/g,' ');
@@ -22586,7 +22586,7 @@ setTimeout(function(){
       var sbr=document.getElementById('sidebar-role');
       if(sbu) sbu.textContent=cu.name||cu.username;
       if(sbr) sbr.textContent=String(cu.role||'').replace(/_/g,' ');
-      var rb=document.getElementById('user-role-badge');
+      var rb=document.getElementById('user-badge-role');
       if(rb)  rb.textContent=String(cu.role||'').replace(/_/g,' ');
       var sn=document.getElementById('nav-settings-item');
       if(sn)  sn.style.display=(cu.role==='MAIN_ADMIN')?'':'none';
@@ -22847,7 +22847,7 @@ setTimeout(function(){
       if(ap) ap.style.display='';
       var sbu=document.getElementById('sidebar-username'); if(sbu) sbu.textContent=cu.name||cu.username;
       var sbr=document.getElementById('sidebar-role');     if(sbr) sbr.textContent=String(cu.role||'').replace(/_/g,' ');
-      var rb=document.getElementById('user-role-badge');   if(rb)  rb.textContent=String(cu.role||'').replace(/_/g,' ');
+      var rb=document.getElementById('user-badge-role');   if(rb)  rb.textContent=String(cu.role||'').replace(/_/g,' ');
       var sn=document.getElementById('nav-settings-item'); if(sn)  sn.style.display=(cu.role==='MAIN_ADMIN')?'':'none';
 
       // Apply debug visibility
