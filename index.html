@@ -13500,13 +13500,28 @@ navigate = (function(orig){
 
   function getCacheDiagnostic(){
     const storage=testLocalStorage();
-    const slots=cacheIndex();
-    const latestSlot=slots.length?slots[slots.length-1]:'';
-    const latest=latestSlot?readSnapshot(latestSlot):null;
+    // -- LIVE SOURCE OF TRUTH: read from the UPC system (upc_meta_v2 /
+    // UPC.KEYS), which is what every sync/periodic-save actually writes to.
+    // IMPORTANT: upcMeta/UPC_KEYS are declared inside a DIFFERENT IIFE than
+    // this one, so they're only reachable via window.UPC.meta()/window.UPC.KEYS
+    // — NOT as bare identifiers (referencing them bare silently resolved to
+    // undefined here, which is why this kept showing "no cache" even when a
+    // real cache existed).
+    const liveMeta = (window.upHourlyCache && typeof window.upHourlyCache.meta==='function') ? window.upHourlyCache.meta() : {};
+    const hasLiveCache = !!(liveMeta && liveMeta.savedAt);
+    const upcKeysMap = (window.UPC && window.UPC.KEYS) ? window.UPC.KEYS : {};
+    const slots = hasLiveCache ? ['live'] : [];
+    const latest = hasLiveCache ? {
+      savedAt: liveMeta.savedAt,
+      reason: liveMeta.reason||'sync',
+      data: (typeof window.APP!=='undefined' && window.APP) ? Object.fromEntries(
+        Object.keys(upcKeysMap).filter(k=>Array.isArray(APP[k])&&APP[k].length).map(k=>[k,APP[k]])
+      ) : {}
+    } : null;
     return {
       storage,
       slots,
-      latestSlot,
+      latestSlot: hasLiveCache ? 'live' : '',
       latest,
       latestRows:rowCount(latest),
       latestSize:storageSize(latest),
@@ -13577,6 +13592,16 @@ navigate = (function(orig){
   // corrupted by a restore action.
   window.upMainAdminRestoreCache=function(slot){
     if(!isMainAdmin()) return false;
+    if(slot==='live'){
+      // The live UPC cache IS what's already loaded/current — "restore" here
+      // just means reload it fresh from localStorage into APP.*.
+      if(!confirm('Reload the current cache into the live view? This does not delete any data.')) return false;
+      const ok = (window.upHourlyCache && typeof window.upHourlyCache.load==='function') ? !!window.upHourlyCache.load(false) : false;
+      try{ toast(ok?'Current cache reloaded.':'No cache to reload.', ok?'success':'warning'); }catch(e){}
+      renderSettingsCacheStatus();
+      try{ if(ok) navigate(APP.currentPage||'dashboard'); }catch(e){}
+      return ok;
+    }
     const snap=readSnapshot(slot);
     if(!snap || !snap.data){ try{ toast('That cache slot is no longer available.','warning'); }catch(e){} return false; }
     if(!confirm('Restore data from cache slot '+slot+' (saved '+formatTime(snap.savedAt)+')? This only changes what is currently displayed - it does not delete any other saved cache.')) return false;
@@ -13613,10 +13638,10 @@ navigate = (function(orig){
       </div>` : '';
 
     const slotRows=d.slots.slice().reverse().map((slot,index)=>{
-      const snap=readSnapshot(slot);
+      const snap = slot==='live' ? d.latest : readSnapshot(slot);
       return `<tr>
         <td><span class="badge ${index===0?'badge-green':'badge-blue'}">${index===0?'Latest':'Previous'}</span></td>
-        <td>${escapeHtml(slot)}</td>
+        <td>${slot==='live'?'Current':escapeHtml(slot)}</td>
         <td>${escapeHtml(formatTime(snap&&snap.savedAt))}</td>
         <td style="font-size:11px">${escapeHtml(dataSourceLabel(snap))}</td>
         <td>${escapeHtml((snap&&snap.reason)||'Unknown')}</td>
@@ -20282,58 +20307,38 @@ function lsSet(key, val){
 
 function sdcSave(allRows){
   if(!Array.isArray(allRows) || !allRows.length) return;
-  var currentMonth = todayMonthKey();
-
-  // Save ALL rows in single key — no frozen/live split
-  // Lock status does NOT affect what is saved
-  lsSet(SDC_LIVE_KEY, {
-    month:   currentMonth,
-    rows:    allRows,
-    savedAt: new Date().toISOString(),
-    count:   allRows.length
-  });
-  lsSet(SDC_META_KEY, {
-    lastSave:  new Date().toISOString(),
-    liveMonth: currentMonth,
-    totalRows: allRows.length
-  });
-  console.log('[SDC] Saved - ' + allRows.length + ' rows (all months, no lock filter)');
+  // Redirected: SDC used to keep its own separate copy of productionData
+  // (sdc_live_v1/sdc_meta_v1) — now it's just part of the single unified
+  // cache (upcSave already wrote APP.productionData into it). This call
+  // becomes a light touch-up: make sure APP.productionData matches what
+  // was passed in, then let the unified save pick it up.
+  if(window.APP) APP.productionData = allRows;
+  try{ if(window.UPC && typeof window.UPC.save==='function') window.UPC.save('sdc-sync'); }catch(e){}
+  console.log('[SDC] Saved via unified cache - ' + allRows.length + ' rows');
 }
 
-// -- Load: merge frozen + live → full dataset ------------------------------
-// Load all rows from single cache — no frozen/live split, no lock filter
+// -- Load: reads from the SAME unified cache as everything else -----------
 function sdcLoad(){
-  var live = lsGet(SDC_LIVE_KEY);
-  if(live && Array.isArray(live.rows) && live.rows.length){
-    console.log('[SDC] Loaded ' + live.rows.length + ' rows (all months)');
-    return live.rows;
-  }
-  // Legacy: try frozen key for migration
-  var frozen = lsGet(SDC_FROZEN_KEY);
-  if(frozen && frozen.months){
-    var all = [];
-    Object.keys(frozen.months).forEach(function(m){ all = all.concat(frozen.months[m]||[]); });
-    if(all.length){
-      console.log('[SDC] Loaded ' + all.length + ' rows (legacy frozen)');
-      return all;
-    }
-  }
-  return [];
+  var u = (window.UPC && typeof window.UPC.read==='function') ? window.UPC.read() : {};
+  var rows = (u && u.data && Array.isArray(u.data.productionData)) ? u.data.productionData : [];
+  if(rows.length) console.log('[SDC] Loaded ' + rows.length + ' rows (unified cache)');
+  return rows;
 }
 
 // -- Check if we have useful cached data ----------------------------------
 function sdcHasData(){
-  var meta = lsGet(SDC_META_KEY);
-  if(!meta) return false;
-  return (meta.totalRows || 0) > 0;
+  var u = (window.UPC && typeof window.UPC.read==='function') ? window.UPC.read() : {};
+  return !!(u && u.data && Array.isArray(u.data.productionData) && u.data.productionData.length);
 }
 
 function sdcInfo(){
+  var u = (window.UPC && typeof window.UPC.read==='function') ? window.UPC.read() : {};
+  var rows = (u && u.data && Array.isArray(u.data.productionData)) ? u.data.productionData : [];
   return {
-    meta:         lsGet(SDC_META_KEY),
-    liveMonth:    (lsGet(SDC_LIVE_KEY)||{}).month,
-    liveCount:    ((lsGet(SDC_LIVE_KEY)||{}).rows||[]).length,
-    frozenMonths: Object.keys(((lsGet(SDC_FROZEN_KEY)||{}).months)||{}),
+    meta:         u.meta || null,
+    liveMonth:    todayMonthKey(),
+    liveCount:    rows.length,
+    frozenMonths: [],
     todayMonth:   todayMonthKey()
   };
 }
@@ -20724,78 +20729,125 @@ var UPC_META_KEY = 'upc_meta_v2';   // stores {savedAt, version}
 var UPC_BACKUP_CFG_KEY = 'upc_backup_cfg_v2';
 var UPC_BACKUP_HIST_KEY = 'upc_backup_hist_v2';
 
+// ═══════════════════════════════════════════════════════════════════════
+// SINGLE UNIFIED CACHE — one localStorage key, written whole on every sync,
+// read whole on load, cleared whole on Clear Cache. Replaces what used to
+// be THREE separate, drifting systems: UPC (multi-key), SDC (its own
+// sdc_live_v1/sdc_meta_v1 keys — which turned out to be a plain duplicate
+// of productionData), and a standalone dispatch-normalized key. All three
+// now live inside this one object so there is exactly one cache, and it
+// stays intact until the next successful sync overwrites it.
+// ═══════════════════════════════════════════════════════════════════════
+var UP_UNIFIED_CACHE_KEY = 'up_cache_v1';
+function ucRead(){
+  try{ return JSON.parse(localStorage.getItem(UP_UNIFIED_CACHE_KEY)||'{}'); }catch(e){ return {}; }
+}
+function ucWrite(obj){
+  try{ localStorage.setItem(UP_UNIFIED_CACHE_KEY, JSON.stringify(obj)); return true; }
+  catch(e){ log('warn','Unified cache write failed',e.message); return false; }
+}
+
 function log(t,m,d){ try{ if(typeof debugLog==='function') debugLog(t,m,d||''); }catch(e){} }
 
-// -- 1. SAVE - write all APP arrays to localStorage -----------
+// -- 1. SAVE - ONE write, ONE JSON blob, everything in it -------------------
 function upcSave(reason){
   try{
+    var dataObj = {};
     Object.keys(UPC_KEYS).forEach(function(prop){
       var arr = window.APP && APP[prop];
-      if(Array.isArray(arr) && arr.length){
-        // fgData stored as {rows, savedAt} for FG module compatibility
-        var toStore = (prop === 'fgData')
-          ? JSON.stringify({rows: arr, savedAt: Date.now()})
-          : JSON.stringify(arr);
-        try{ localStorage.setItem(UPC_KEYS[prop], toStore); }catch(e){}
-      }
+      if(Array.isArray(arr) && arr.length) dataObj[prop] = arr;
     });
-    // Also save normalized dispatch data (APP.upDispatchData) so dispatch
-    // page loads instantly from cache without re-normalizing on every open.
-    // This is the same key - the normalized array is what the page reads.
+    // Normalized dispatch data (APP.upDispatchData) — folded into the same
+    // object instead of its own separate localStorage key.
+    var udArr = window.APP && APP.upDispatchData;
+    if(Array.isArray(udArr) && udArr.length) dataObj.upDispatchData = udArr;
+
+    var nowIso = new Date().toISOString();
+    var unified = {
+      meta: {
+        savedAt: nowIso,
+        reason: reason||'manual',
+        version: 'UPC_V3_UNIFIED',
+        currentMonth: (window.APP && APP.currentMonth) || '',
+        currentPage: (window.APP && APP.currentPage) || ''
+      },
+      data: dataObj,
+      wipSyncTime: dataObj.wipData ? nowIso : ((ucRead().wipSyncTime)||'')
+    };
+    ucWrite(unified);
+
+    // -- Legacy compatibility mirrors --------------------------------------
+    // A handful of older, standalone panels (FG module's own cache, the WIP
+    // page's "cache size" display) still read these specific individual
+    // keys directly rather than through upcLoad(). Mirroring keeps those
+    // working without a full rewrite of every legacy reader, while the
+    // unified object above remains the one real source of truth going
+    // forward (this is the ONLY other place anything gets written).
     try{
-      var udArr = window.APP && APP.upDispatchData;
-      if(Array.isArray(udArr) && udArr.length){
-        localStorage.setItem('upc_dispatch_normalized_v2', JSON.stringify(udArr));
-      }
+      if(dataObj.fgData) localStorage.setItem(UPC_KEYS.fgData, JSON.stringify({rows:dataObj.fgData, savedAt:Date.now()}));
+      if(dataObj.wipData){ localStorage.setItem(UPC_KEYS.wipData, JSON.stringify(dataObj.wipData)); localStorage.setItem('upc_wip_sync_time', nowIso); }
     }catch(e){}
-    localStorage.setItem(UPC_META_KEY, JSON.stringify({
-      savedAt: new Date().toISOString(),
-      reason: reason||'manual',
-      version: 'UPC_V2',
-      currentMonth: (window.APP && APP.currentMonth) || '',
-      currentPage: (window.APP && APP.currentPage) || ''
-    }));
-    log('ok','UPC saved',reason||'');
-    try{ if(typeof window.updateLastSyncIndicator==='function') window.updateLastSyncIndicator(new Date().toISOString()); }catch(e){}
-    try{ window._upcLastSavedAt = new Date().toISOString(); }catch(e){}
+
+    log('ok','UPC saved (unified)',reason||'');
+    try{ if(typeof window.updateLastSyncIndicator==='function') window.updateLastSyncIndicator(nowIso); }catch(e){}
+    try{ window._upcLastSavedAt = nowIso; }catch(e){}
     return true;
   }catch(e){ log('warn','UPC save failed',e.message); return false; }
 }
 
-// -- 2. LOAD - read all keys into APP arrays ------------------
+// -- 2. LOAD - read the ONE key into APP arrays ------------------
 function upcLoad(){
   var loaded = 0;
-  Object.keys(UPC_KEYS).forEach(function(prop){
-    try{
-      var raw = localStorage.getItem(UPC_KEYS[prop]);
-      if(raw){
-        var parsed = JSON.parse(raw);
-        var arr;
-        // FG cache is stored as {rows, savedAt} by the FG module
-        if(parsed && !Array.isArray(parsed) && Array.isArray(parsed.rows)){
-          arr = parsed.rows;
-        } else if(Array.isArray(parsed)){
-          arr = parsed;
-        }
-        if(arr && arr.length){
-          if(typeof APP !== 'undefined') APP[prop] = arr;
-          loaded++;
-        }
-      }
-    }catch(e){}
-  });
-  // After loading, populate APP.upDispatchData from normalized cache
-  // so dispatch page renders instantly without re-normalizing raw rows.
-  try{
-    var normRaw = localStorage.getItem('upc_dispatch_normalized_v2');
-    if(normRaw){
-      var normArr = JSON.parse(normRaw);
-      if(Array.isArray(normArr) && normArr.length && typeof APP !== 'undefined'){
-        APP.upDispatchData = normArr;
+  var unified = ucRead();
+  if(unified && unified.data && Object.keys(unified.data).length){
+    // Normal path: everything comes from the single unified cache.
+    Object.keys(unified.data).forEach(function(prop){
+      var arr = unified.data[prop];
+      if(Array.isArray(arr) && arr.length){
+        if(typeof APP !== 'undefined') APP[prop] = arr;
         loaded++;
       }
-    }
-  }catch(e){}
+    });
+  } else {
+    // One-time fallback: a browser that had cache saved BEFORE this
+    // consolidation (scattered upc_*_v2 keys + sdc_live_v1 + a separate
+    // dispatch-normalized key) won't have up_cache_v1 yet. Read the old
+    // scattered keys once so that cache isn't silently lost on first load
+    // after the update — the very next sync will write everything into
+    // the new unified key from then on.
+    Object.keys(UPC_KEYS).forEach(function(prop){
+      try{
+        var raw = localStorage.getItem(UPC_KEYS[prop]);
+        if(raw){
+          var parsed = JSON.parse(raw);
+          var arr;
+          if(parsed && !Array.isArray(parsed) && Array.isArray(parsed.rows)) arr = parsed.rows;
+          else if(Array.isArray(parsed)) arr = parsed;
+          if(arr && arr.length){
+            if(typeof APP !== 'undefined') APP[prop] = arr;
+            loaded++;
+          }
+        }
+      }catch(e){}
+    });
+    try{
+      var normRaw = localStorage.getItem('upc_dispatch_normalized_v2');
+      if(normRaw){
+        var normArr = JSON.parse(normRaw);
+        if(Array.isArray(normArr) && normArr.length && typeof APP !== 'undefined'){ APP.upDispatchData = normArr; loaded++; }
+      }
+    }catch(e){}
+    try{
+      var sdcRaw = localStorage.getItem('sdc_live_v1');
+      if(sdcRaw && (!Array.isArray(APP.productionData) || !APP.productionData.length)){
+        var sdcParsed = JSON.parse(sdcRaw);
+        if(sdcParsed && Array.isArray(sdcParsed.rows) && sdcParsed.rows.length && typeof APP !== 'undefined'){ APP.productionData = sdcParsed.rows; loaded++; }
+      }
+    }catch(e){}
+    // Migrate immediately so every subsequent load reads the unified key.
+    if(loaded > 0){ try{ upcSave('migrated-from-legacy-keys'); }catch(e){} }
+  }
+
   // After loading production data, apply the SAME filter rule as
   // restoreSessionState: same-day saved filter → restore; otherwise
   // → This Month default. (Previously this block had two competing
@@ -20823,28 +20875,39 @@ function upcLoad(){
   return loaded > 0;
 }
 
-// -- 3. GET META - last saved time ----------------------------
+// -- 3. GET META - last saved time (from the ONE unified cache) ----------
 function upcMeta(){
-  try{ return JSON.parse(localStorage.getItem(UPC_META_KEY)||'{}'); }catch(e){ return {}; }
+  var u = ucRead();
+  return (u && u.meta) ? u.meta : {};
 }
 
-// -- 4. CLEAR -------------------------------------------------
+// -- 4. CLEAR - removes the ONE unified key + every legacy key from any
+// prior cache generation, so nothing is ever left stuck behind.
 function upcClear(){
+  try{ localStorage.removeItem(UP_UNIFIED_CACHE_KEY); }catch(e){}
+  // Legacy UPC individual keys (pre-consolidation)
   Object.values(UPC_KEYS).forEach(function(k){ try{ localStorage.removeItem(k); }catch(e){} });
   try{ localStorage.removeItem(UPC_META_KEY); }catch(e){}
   try{ localStorage.removeItem('upc_dispatch_normalized_v2'); }catch(e){}
-  // Also clear old V17 hourly slots
+  try{ localStorage.removeItem('upc_wip_sync_time'); }catch(e){}
+  // Legacy SDC keys (its own separate copy of productionData)
+  try{
+    localStorage.removeItem('sdc_live_v1');
+    localStorage.removeItem('sdc_frozen_v1');
+    localStorage.removeItem('sdc_meta_v1');
+  }catch(e){}
+  // Legacy V17 hourly slots
   try{
     var idx = JSON.parse(localStorage.getItem('up_erp_hour_cache_v17_index')||'[]');
     idx.forEach(function(s){ try{ localStorage.removeItem('up_erp_hour_cache_v17_'+s); }catch(e){} });
     localStorage.removeItem('up_erp_hour_cache_v17_index');
   }catch(e){}
-  // Clear old V1 keys
+  // Ancient V1 keys
   ['up_cached_production_v1','up_cached_wip_v1','up_cached_ink_v1',
    'up_cached_planning_v1','up_cached_material_v1','up_cached_users_v1',
    'up_cached_updispatch_v1','up_fg_stock_v1'].forEach(function(k){
     try{ localStorage.removeItem(k); }catch(e){} });
-  log('warn','UPC cleared','All cache keys removed');
+  log('warn','UPC cleared','Unified cache + all legacy cache keys removed');
 }
 
 // -- 5. REBUILD DERIVED ARRAYS --------------------------------
@@ -21305,6 +21368,7 @@ window.UPC = {
   save: upcSave, load: upcLoad, clear: upcClear, meta: upcMeta,
   postSync: upcPostSync, rebuildDerived: upcRebuildDerived,
   pushToModules: upcPushToModules, startPeriodicSave: upcStartPeriodicSave,
+  read: ucRead, write: ucWrite,
   KEYS: UPC_KEYS, BACKUP_CFG_KEY: UPC_BACKUP_CFG_KEY, BACKUP_HIST_KEY: UPC_BACKUP_HIST_KEY
 };
 
