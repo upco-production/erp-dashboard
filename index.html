@@ -15719,14 +15719,26 @@ function fmtTime(d){
 async function apiGet(action,extra){
   const sheetId=getMaintSheetId();
   if(!sheetId) throw new Error('Maintenance Sheet ID not configured in Settings');
-  return erpApi(Object.assign({action,sheetId,tab:TAB_REQ},extra||{}));
+  const _tab = (extra && extra.tab) || TAB_REQ;
+  // erpApi() defaults headerRow to 3 generically (correct for ACM/SYSTEM_MASTER reads,
+  // WRONG for maintenance tabs) — always pass the correct header row explicitly so
+  // that generic default never silently wins.
+  const _hdrByTab = { [TAB_REQ]: 2, [TAB_PROG]: 1 };
+  const _headerRow = (extra && extra.headerRow) || _hdrByTab[_tab] || 1;
+  return erpApi(Object.assign({action,sheetId,tab:TAB_REQ,headerRow:_headerRow},extra||{}));
 }
 async function apiPost(action,body){
   const sheetId=getMaintSheetId();
   if(!sheetId) throw new Error('Maintenance Sheet ID not configured in Settings');
+  // Same fix as apiGet: erpApi() defaults headerRow to 3 generically, which is
+  // WRONG for maintenance tabs (real header is row 2 for MAINTENANCE_REQUESTS,
+  // row 1 for MAINTENANCE_PROGRESS). Always pass the correct value explicitly.
+  const _tab = (body && body.tab) || TAB_REQ;
+  const _hdrByTab = { [TAB_REQ]: 2, [TAB_PROG]: 1 };
+  const _headerRow = (body && body.headerRow) || _hdrByTab[_tab] || 2;
   // Apps Script doPost reads action from payload.action (body), not URL params.
   // We put action+sheetId BOTH in URL params AND in the body so either pattern works.
-  const merged=Object.assign({action,sheetId},body||{});
+  const merged=Object.assign({action,sheetId,headerRow:_headerRow},body||{});
   return erpApi({action,sheetId},merged);
 }
 async function syncFromSheets(){
