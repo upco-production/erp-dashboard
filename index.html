@@ -538,7 +538,12 @@ tr:hover td{background:rgba(255,255,255,.02)}
   .header-right .pr-header-btn .pr-btn-label{display:none}
   /* Show only sync button on mobile */
   #sync-now-btn{font-size:10px;padding:4px 8px}
-  #user-role-badge{display:none}
+  /* Profile badge + Enable Notifications (nested in its dropdown) must stay
+     reachable on mobile — previously force-hidden here, which is why
+     neither showed up. Shrink instead of hiding: icon only, name/role text
+     dropped, so it still fits next to Sync Now on a narrow screen. */
+  #user-role-badge{padding:5px 7px}
+  #user-role-badge #user-badge-name,#user-role-badge #user-badge-role{display:none}
 
   /* Content padding */
   .content{padding:12px}
