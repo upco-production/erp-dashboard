@@ -16805,9 +16805,15 @@ function renderMaintQueue(_resetFilter){
     hint='Maintenance requests for '+_myDeptScope+' department.';
   } else if(canAcceptMaint()){
     const myType=isTech()?roleToTypeCode(role):null;
-    mine=all.filter(r=>(myType?g(r,'type')===myType:true)&&['OPEN','ACCEPTED'].includes(g(r,'status')));
+    const _typeAliasesQ={ME:['ME','MECHANICAL','PM'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
+    const _typeMatchQ=r=>!myType||(_typeAliasesQ[myType]||[myType]).indexOf(String(g(r,'type')||'').toUpperCase())>-1;
+    // Include the FULL lifecycle relevant to tech team: OPEN/ACCEPTED (Stage 2 accept),
+    // IN_PROGRESS (Stage 4 - file tech report), PENDING_REVIEW (Stage 5 - confirm & lock).
+    // Previously this only included OPEN/ACCEPTED, so Stage 4/5 items never even
+    // appeared in the queue for MECH/ELEC/UTIL_INCHARGE and TECH_MANAGER.
+    mine=all.filter(r=>_typeMatchQ(r)&&['OPEN','ACCEPTED','IN_PROGRESS','PENDING_REVIEW'].includes(g(r,'status')));
     heading=myType?('Requests Awaiting Your Team'):'Requests Awaiting Acceptance';
-    hint=myType?('These '+myType.toLowerCase()+' requests are open and waiting for your acceptance.'):'Open maintenance requests awaiting your acceptance.';
+    hint=myType?('These '+myType.toLowerCase()+' requests need your action — accept, file a report, or confirm & lock.'):'Maintenance requests awaiting your acceptance or action.';
   } else if(isIncharge()){
     const it=inchargeTeam();
     mine=all.filter(r=>(!it||g(r,'type')===it)&&g(r,'status')==='PENDING_REVIEW');
@@ -16896,8 +16902,14 @@ function _actionBtn(r){
     return `<button class="btn btn-primary btn-sm" onclick="window.openMaintStage4('${g(r,'id')}')">📝 File Report</button>`;
   if(canStage3(r)&&st==='ACCEPTED')
     return `<button class="btn btn-primary btn-sm" onclick="window.openMaintStage3('${g(r,'id')}')">🕐 Log Times</button>`;
-  if(isIncharge()&&st==='PENDING_REVIEW'&&(!inchargeTeam()||g(r,'type')===inchargeTeam()))
-    return `<button class="btn btn-primary btn-sm" onclick="window.openMaintConfirm('${g(r,'id')}')">✅ Review & Confirm</button>`;
+  if(st==='PENDING_REVIEW'){
+    // Production incharge sign-off (their dept's request)
+    if(isIncharge()&&(!inchargeTeam()||g(r,'type')===inchargeTeam()))
+      return `<button class="btn btn-primary btn-sm" onclick="window.openMaintConfirm('${g(r,'id')}')">✅ Review & Confirm</button>`;
+    // TECH_MANAGER / TECH_UTILITY final confirm & lock
+    if(canStage5(r))
+      return `<button class="btn btn-primary btn-sm" onclick="window.openMaintConfirm('${g(r,'id')}')">🔒 Confirm & Lock</button>`;
+  }
   return '';
 }
 
