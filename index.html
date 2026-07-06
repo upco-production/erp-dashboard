@@ -15841,20 +15841,16 @@ function canStage4(r){
   return (PM_ALIASES[tScope]||[]).indexOf(reqType) > -1;
 }
 // Can this user confirm/lock (Stage 5)?
-// TECH_MANAGER (all depts) + TECH_UTILITY (UT requests only)
+// ONLY: MAIN_ADMIN (full), MANAGER (full), TECH_MANAGER (own dept type only)
 function canStage5(r){
   if(isAdmin()) return true;
   const role = curRole();
-  const reqType = String(g(r,'type')||'').trim().toUpperCase();
-  const PM_ALIASES = {ME:['ME','MECHANICAL','PM'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
-  // TECH_MANAGER — confirms own dept type
+  if(role === 'MANAGER') return true; // Manager can lock any request
   if(role === 'TECH_MANAGER'){
+    const reqType = String(g(r,'type')||'').trim().toUpperCase();
+    const PM_ALIASES = {ME:['ME','MECHANICAL','PM'],EE:['EE','ELECTRICAL'],UT:['UT','UTILITIES','UTILITY']};
     const tScope = techTypeScope();
     return tScope && (PM_ALIASES[tScope]||[]).indexOf(reqType) > -1;
-  }
-  // TECH_UTILITY — confirms UT requests only
-  if(role === 'TECH_UTILITY'){
-    return (PM_ALIASES['UT']||[]).indexOf(reqType) > -1;
   }
   return false;
 }
