@@ -23453,4 +23453,30 @@ setTimeout(function(){
   }, {passive:true});
 })();
 </script>
+
+<script>
+// ============================================================
+// STANDALONE MAINTENANCE POLLING WATCHDOG
+// Registered independently at the very end of the page (outside any
+// other closure) as a guaranteed fallback — ensures maintenance data
+// refreshes every 5s even if something upstream silently prevented
+// the main SOF module's own interval from registering.
+// ============================================================
+(function(){
+  var WATCHDOG_INTERVAL_MS = 5000;
+  setInterval(function(){
+    try{
+      if(typeof APP === 'undefined' || !APP || !APP.currentUser) return;
+      if(APP.currentPage !== 'maintenance') return;
+      if(document.hidden) return;
+      if(typeof window.sofBgMaintRefresh === 'function'){
+        window.sofBgMaintRefresh(false);
+      }
+    }catch(e){
+      console.warn('[Watchdog] Maintenance poll error:', e.message);
+    }
+  }, WATCHDOG_INTERVAL_MS);
+  console.log('[Watchdog] Standalone maintenance polling active (every 5s)');
+})();
+</script>
 </html>
