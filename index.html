@@ -5809,16 +5809,20 @@ function applyFilter(){
 // =============================================
 function renderReports(container){
   container.innerHTML=`
-    <div class="section-header"><div class="section-title">Reports Center</div><div class="section-actions"><button class="btn btn-primary btn-sm" onclick="generateReport('daily')">Generate Report</button></div></div>
+    <div class="section-header"><div class="section-title">Reports Center</div><div class="section-actions"><button class="btn btn-primary btn-sm" onclick="window.generateProductionReport()">Generate Report</button></div></div>
     <div class="form-grid" style="margin-bottom:20px">
       ${['Daily Production Report','Department Report','SAP PO Journey Report','ERP Work Center Report','Wastage Report','Downtime Report','Quality NCR Report','Management Summary'].map(r=>`
-        <div class="chart-card" style="cursor:pointer" onclick="toast('Generating ${r}...','info')">
+        <div class="chart-card" style="cursor:pointer" onclick="${r==='Daily Production Report'?'window.generateProductionReport()':`toast('${r} is not yet available','warning')`}">
           <div style="font-size:24px;margin-bottom:8px">${reportIcon(r)}</div>
           <div style="font-weight:600;font-size:13px;margin-bottom:4px">${r}</div>
-          <div style="font-size:11px;color:var(--text3)">Click to generate</div>
+          <div style="font-size:11px;color:var(--text3)">${r==='Daily Production Report'?'Click to generate':'Coming soon'}</div>
           <div style="display:flex;gap:6px;margin-top:10px">
-            <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();toast('Downloading PDF...','success')">PDF</button>
-            <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();toast('Downloading Excel...','success')">Excel</button>
+            ${r==='Daily Production Report'?`
+              <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();window.generateProductionReport()">PDF</button>
+            `:`
+              <button class="btn btn-outline btn-sm" disabled style="opacity:.5;cursor:not-allowed" onclick="event.stopPropagation()">PDF</button>
+              <button class="btn btn-outline btn-sm" disabled style="opacity:.5;cursor:not-allowed" onclick="event.stopPropagation()">Excel</button>
+            `}
           </div>
         </div>`).join('')}
     </div>`;
@@ -5830,7 +5834,185 @@ function reportIcon(r){
   return '📄';
 }
 
-function generateReport(type){ toast('Report generated successfully. Downloading...','success'); }
+function generateReport(type){
+  if(type==='daily'){ window.generateProductionReport(); return; }
+  toast('This report type is not yet implemented','warning');
+}
+
+// Real Production Report — matches the "PRODUCTION REPORT" PDF layout exactly:
+// colored KPI cards per department (Printing/Lamination/Slitting/Bag Making/Dispatch),
+// then a day-by-day table for the selected month, then a GRAND TOTAL row.
+window.generateProductionReport = function(monthOverride){
+  const month = monthOverride || APP.currentMonth || (function(){
+    const d=new Date(); return d.toLocaleString('en',{month:'short'})+'-'+String(d.getFullYear()).slice(2);
+  })();
+
+  function n(v){ if(v===undefined||v===null||v==='') return 0; const x=parseFloat(String(v).replace(/,/g,'')); return isNaN(x)?0:x; }
+  function ymKey(dateStr){
+    // Accept ISO or DD-MMM-YY / DD/MM/YYYY style — normalize to 'Mon-YY'
+    const d = new Date(dateStr);
+    if(isNaN(d)) return '';
+    return d.toLocaleString('en',{month:'short'})+'-'+String(d.getFullYear()).slice(2);
+  }
+  function dayOfMonth(dateStr){
+    const d = new Date(dateStr);
+    return isNaN(d) ? null : d.getDate();
+  }
+  function daysInMonth(mKey){
+    // mKey like 'Jul-26' → figure out year+month, return count of days
+    const parts = mKey.split('-');
+    const monthsAbbr=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const mi = monthsAbbr.findIndex(x=>x.toLowerCase()===parts[0].toLowerCase());
+    const yr = 2000+parseInt(parts[1],10);
+    return new Date(yr, mi+1, 0).getDate();
+  }
+
+  const prod = (APP.productionData||[]).filter(r=>{
+    const raw = r.PRODUCTION_DATE||r.date||'';
+    return ymKey(raw)===month;
+  });
+  const disp = (APP.dispatchData||[]).filter(r=>{
+    const raw = r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE||'';
+    return ymKey(raw)===month;
+  });
+
+  const nDays = daysInMonth(month);
+  const days = Array.from({length:nDays},(_,i)=>i+1);
+
+  function deptRowsForDay(dept, day){
+    return prod.filter(r=>r.dept===dept && dayOfMonth(r.PRODUCTION_DATE||r.date)===day);
+  }
+  function resolveDispatchCategory(r){
+    const plant=String(r['PLANT/TYPE']||r['PLANT_TYPE']||r['PLANTTYPE']||r['PLANT']||r['TYPE']||'').trim().toUpperCase();
+    if(/EXPORT/.test(plant)) return 'Export';
+    if(/UF/.test(plant)) return 'UF';
+    return 'UP';
+  }
+  function resolveDispatchKg(r){
+    const keys=['DISPATCHED (KG)','DISPATCHED_KG','DISPATCHED KG','DISPATCH KG','DISPATCHEDKG','DISPATCHED','QTY KG','QUANTITY KG','KG','QTY','QUANTITY'];
+    for(const k of keys){ if(r[k]!==undefined && r[k]!=='') return n(r[k]); }
+    return 0;
+  }
+  function dispatchRowsForDay(day){
+    return disp.filter(r=>dayOfMonth(r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE)===day);
+  }
+
+  // Per-day aggregation
+  const rows = days.map(day=>{
+    const pr = deptRowsForDay('Printing',day);
+    const la = deptRowsForDay('Lamination',day);
+    const sl = deptRowsForDay('Slitting',day);
+    const bg = deptRowsForDay('Bag Making',day);
+    const dr = dispatchRowsForDay(day);
+
+    const prMeter = pr.reduce((a,r)=>a+n(r.PRODUCTION_METER),0);
+    const laMeter = la.reduce((a,r)=>a+n(r.PRODUCTION_METER),0);
+    const slMeter = sl.reduce((a,r)=>a+n(r.PRODUCTION_METER),0);
+    const bgTon   = bg.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000;
+    const bgPcs   = bg.reduce((a,r)=>a+n(r.PRODUCTION_PCS||r.productionPcs),0);
+
+    const upTon = dr.filter(r=>resolveDispatchCategory(r)==='UP').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
+    const ufTon = dr.filter(r=>resolveDispatchCategory(r)==='UF').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
+    const expQty= dr.filter(r=>resolveDispatchCategory(r)==='Export').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
+    const bagPouchCount = dr.reduce((a,r)=>a+n(r.BAG_POUCH_QTY||r.bagPouchQty),0);
+
+    return {
+      day, prMeter, prTon:(pr.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000),
+      laMeter, laTon:(la.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000),
+      slMeter, slTon:(sl.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000),
+      bgTon, bgPcs, upTon, ufTon, expQty, bagPouchCount
+    };
+  });
+
+  const tot = rows.reduce((a,r)=>({
+    prMeter:a.prMeter+r.prMeter, prTon:a.prTon+r.prTon,
+    laMeter:a.laMeter+r.laMeter, laTon:a.laTon+r.laTon,
+    slMeter:a.slMeter+r.slMeter, slTon:a.slTon+r.slTon,
+    bgTon:a.bgTon+r.bgTon, bgPcs:a.bgPcs+r.bgPcs,
+    upTon:a.upTon+r.upTon, ufTon:a.ufTon+r.ufTon, expQty:a.expQty+r.expQty, bagPouchCount:a.bagPouchCount+r.bagPouchCount
+  }),{prMeter:0,prTon:0,laMeter:0,laTon:0,slMeter:0,slTon:0,bgTon:0,bgPcs:0,upTon:0,ufTon:0,expQty:0,bagPouchCount:0});
+
+  const f2=x=>(x||0).toFixed(2);
+  const f0=x=>Math.round(x||0).toLocaleString();
+  const genTime = new Date().toLocaleString('en-PK',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true});
+
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>Production Report - ${month}</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;margin:24px;color:#1e293b;font-size:12px}
+    .hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+    .logo{font-weight:800;color:#cc0000;font-size:14px}
+    .title{text-align:center;margin:10px 0 2px}
+    .title h1{color:#cc0000;font-size:22px;margin:0;letter-spacing:1px}
+    .sub{text-align:center;color:#64748b;font-size:11px;margin-bottom:16px}
+    .kpi-row{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+    .kpi{flex:1;min-width:140px;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px;border-top:3px solid #ccc}
+    .kpi .lbl{font-size:10px;color:#64748b;text-transform:uppercase;font-weight:700}
+    .kpi .val{font-size:18px;font-weight:800;margin:2px 0}
+    .kpi .sub2{font-size:10px;color:#94a3b8}
+    table{width:100%;border-collapse:collapse;font-size:10.5px}
+    th,td{border:1px solid #e2e8f0;padding:4px 6px;text-align:right}
+    th{background:#f1f5f9;font-size:9.5px;text-transform:uppercase;color:#475569}
+    td:first-child,th:first-child{text-align:left}
+    .grp{text-align:center;font-weight:700;background:#f8fafc}
+    tr.total td{font-weight:800;background:#f1f5f9}
+    .foot{margin-top:14px;font-size:10px;color:#94a3b8}
+    @media print{ body{margin:8px} }
+  </style></head><body>
+  <div class="hdr"><span class="logo">UP</span><span></span></div>
+  <div class="title"><h1>PRODUCTION REPORT</h1></div>
+  <div class="sub">Universal Packaging Pvt. Ltd. &middot; Period: <b>${month}</b></div>
+
+  <div class="kpi-row">
+    <div class="kpi" style="border-top-color:#22d3ee"><div class="lbl">Printing</div><div class="val">${f2(tot.prTon)} Ton</div><div class="sub2">Meter: ${f0(tot.prMeter)}</div></div>
+    <div class="kpi" style="border-top-color:#a371f7"><div class="lbl">Lamination</div><div class="val">${f2(tot.laTon)} Ton</div><div class="sub2">Meter: ${f0(tot.laMeter)}</div></div>
+    <div class="kpi" style="border-top-color:#8b5cf6"><div class="lbl">Slitting</div><div class="val">${f2(tot.slTon)} Ton</div><div class="sub2">Meter: ${f0(tot.slMeter)}</div></div>
+    <div class="kpi" style="border-top-color:#f0883e"><div class="lbl">Bag Making</div><div class="val">${f2(tot.bgTon)} Ton</div><div class="sub2">Pcs: ${f0(tot.bgPcs)}</div></div>
+    <div class="kpi" style="border-top-color:#f778ba"><div class="lbl">Dispatch</div><div class="val">${f2(tot.upTon+tot.ufTon+tot.expQty)} Ton</div><div class="sub2">Bag/Pouch: ${f0(tot.bagPouchCount)}</div></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th rowspan="2" style="vertical-align:bottom">Date</th>
+        <th colspan="2" class="grp">Printing</th><th colspan="2" class="grp">Lamination</th>
+        <th colspan="2" class="grp">Slitting</th><th colspan="2" class="grp">Bag Making</th>
+        <th colspan="4" class="grp">Dispatch</th>
+      </tr>
+      <tr>
+        <th>Meter</th><th>Ton</th><th>Meter</th><th>Ton</th><th>Meter</th><th>Ton</th>
+        <th>Ton</th><th>Pcs</th><th>UP Ton</th><th>UF Ton</th><th>Export Qty</th><th>Bag/Pouch</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows.map(r=>`<tr>
+        <td>${String(r.day).padStart(2,'0')}-${month}</td>
+        <td>${f0(r.prMeter)}</td><td>${f2(r.prTon)}</td>
+        <td>${f0(r.laMeter)}</td><td>${f2(r.laTon)}</td>
+        <td>${f0(r.slMeter)}</td><td>${f2(r.slTon)}</td>
+        <td>${f2(r.bgTon)}</td><td>${f0(r.bgPcs)}</td>
+        <td>${f2(r.upTon)}</td><td>${f2(r.ufTon)}</td><td>${f2(r.expQty)}</td><td>${f0(r.bagPouchCount)}</td>
+      </tr>`).join('')}
+      <tr class="total">
+        <td>GRAND TOTAL</td>
+        <td>${f0(tot.prMeter)}</td><td>${f2(tot.prTon)}</td>
+        <td>${f0(tot.laMeter)}</td><td>${f2(tot.laTon)}</td>
+        <td>${f0(tot.slMeter)}</td><td>${f2(tot.slTon)}</td>
+        <td>${f2(tot.bgTon)}</td><td>${f0(tot.bgPcs)}</td>
+        <td>${f2(tot.upTon)}</td><td>${f2(tot.ufTon)}</td><td>${f2(tot.expQty)}</td><td>${f0(tot.bagPouchCount)}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="foot">Generated ${genTime} &middot; Universal Packaging ERP<br>
+  <i>Note: This is a system-generated report. Minor discrepancies may occur.</i></div>
+
+  <div class="no-print" style="margin-top:16px;text-align:center">
+    <button onclick="window.print()" style="background:#1e3a5f;color:#fff;border:none;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">🖨 Print / Save PDF</button>
+  </div>
+  </body></html>`);
+  win.document.close();
+};
 
 // =============================================
 // IMPORT / EXPORT
@@ -15527,7 +15709,7 @@ function canSeeMaintReq(req){
   // Production dept users: show only their dept
   const scope = userDeptScope();
   if(!scope) return true;
-  return String(g(req,'dept')||'').trim() === scope;
+  return deptEq(g(req,'dept'),scope);
 }
 // Can the logged-in user accept a maintenance request? (Stage 2)
 // Priority: 1) MAIN_ADMIN always yes  2) ACM CAN_ACCEPT_MAINT_REQ if set  3) role fallback (isTech)
@@ -16607,12 +16789,19 @@ function _actionBtn(r){
 // -------------------------------------------------------------------------
 function renderMaintRequests(){
   const c=document.getElementById('maint-content'); if(!c) return;
+  // Preserve any currently-selected filter values across re-renders — background
+  // polling (every 5s) calls this function to keep the table live-updated, and
+  // without this the filter dropdowns would silently reset on every poll tick.
+  const _prevSt = document.getElementById('mf-status')?.value||'';
+  const _prevTy = document.getElementById('mf-type')?.value||'';
+  const _prevPr = document.getElementById('mf-priority')?.value||'';
+  const _prevDp = document.getElementById('mf-dept')?.value||'';
   c.innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-      ${_sel('mf-status','All Status',ALL_STATUSES,'filterMaintList()')}
-      ${_sel('mf-type','All Types (ME/EE/UT/PM)',ALL_TYPES,'filterMaintList()')}
-      ${_sel('mf-priority','All Priorities',['CRITICAL','HIGH','MEDIUM','LOW'],'filterMaintList()')}
-      ${_sel('mf-dept','All Departments',['Printing','Lamination','Slitting','Bag Making'],'filterMaintList()')}
+      ${_sel('mf-status','All Status',ALL_STATUSES,'filterMaintList()',_prevSt)}
+      ${_sel('mf-type','All Types (ME/EE/UT/PM)',ALL_TYPES,'filterMaintList()',_prevTy)}
+      ${_sel('mf-priority','All Priorities',['CRITICAL','HIGH','MEDIUM','LOW'],'filterMaintList()',_prevPr)}
+      ${_sel('mf-dept','All Departments',['Printing','Lamination','Slitting','Bag Making'],'filterMaintList()',_prevDp)}
       <button class="btn btn-outline btn-sm" onclick="syncFromSheets().then(()=>{updateBadge();filterMaintList();toast('Synced from Sheets','success')})">🔄 Sync</button>
       ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="window.exportMaintCSV()">⬇ CSV</button>`:''}
     </div>
@@ -16623,14 +16812,16 @@ function renderMaintRequests(){
         <th>Incharge</th><th>Arrival</th><th>Closing</th><th>DT(min)</th>
         <th>Waste KG</th><th>Action Taken</th><th>Root Cause</th><th>Parts Used</th><th>Actions</th>
       </tr></thead>
-      <tbody id="maint-tbody">${_buildRows((APP.maintenanceRequests||[]).filter(r=>canSeeMaintReq(r)).slice().reverse())}</tbody>
+      <tbody id="maint-tbody"></tbody>
     </table></div></div>`;
+  // Apply the (restored) filter state immediately so the table matches the dropdowns
+  window.filterMaintList();
 }
 window.renderMaintRequests=renderMaintRequests;
 
-function _sel(id,ph,opts,onc){
+function _sel(id,ph,opts,onc,curVal){
   return `<select id="${id}" onchange="${onc}" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none">
-    <option value="">${ph}</option>${opts.map(o=>`<option>${o}</option>`).join('')}</select>`;
+    <option value=""${!curVal?' selected':''}>${ph}</option>${opts.map(o=>`<option${curVal===o?' selected':''}>${o}</option>`).join('')}</select>`;
 }
 window.filterMaintList=function(){
   const st=document.getElementById('mf-status')?.value||'';
@@ -17841,33 +18032,52 @@ window.refreshMaintReport=function(){
 
     <div class="table-card">
       <div class="table-header"><div class="table-title">Maintenance Report - ${rangeLabel}${filterLabel}</div></div>
-      <div style="overflow-x:auto"><table>
-        <thead><tr>
-          <th>Notif No</th><th>Date</th><th>Time</th><th>Type</th><th>Dept</th><th>Machine</th>
-          <th>Priority</th><th>Status</th><th>Description</th><th>Req By</th><th>Shift</th>
-          <th>Incharge</th><th>Arrival</th><th>Closing</th><th>DT(min)</th><th>Waste KG</th>
-          <th>Action Taken</th><th>Root Cause</th><th>Parts Used</th><th>F/U</th>
-        </tr></thead>
-        <tbody>${reqs.length?reqs.map(r=>`<tr>
-          <td style="font-family:monospace;white-space:nowrap">${g(r,'notifNo')||g(r,'id')}</td>
-          <td style="white-space:nowrap">${(()=>{const _rd=g(r,'requestDate')||g(r,'submittedAt')||'';try{const _d=new Date(_rd);return isNaN(_d)?_rd:fmtDate(_d);}catch(e){return _rd||'-';}})()}</td>
-          <td style="white-space:nowrap">${g(r,'requestTime')||'-'}</td>
-          <td>${g(r,'type')}</td><td>${g(r,'dept')}</td><td>${g(r,'machine')||'-'}</td>
-          <td>${pBadge(g(r,'priority'))}</td><td>${sBadge(g(r,'status'))}</td>
-          <td style="max-width:150px;font-size:10px;white-space:normal">${g(r,'description')||'-'}</td>
-          <td>${g(r,'requestedBy')||'-'}</td><td>${g(r,'shift')||'-'}</td>
-          <td>${g(r,'assignedTo')||'-'}</td>
-          <td style="font-size:10px;white-space:nowrap">${fmt(g(r,'arrivalTime'))||'-'}</td>
-          <td style="font-size:10px;white-space:nowrap">${fmt(g(r,'closingTime'))||'-'}</td>
-          <td>${diffMin(g(r,'arrivalTime'),g(r,'closingTime'))??'-'}</td>
-          <td style="color:var(--red)">${g(r,'wasteKg')||'-'}</td>
-          <td style="font-size:10px;white-space:normal;max-width:150px">${g(r,'actionTaken')||'-'}</td>
-          <td style="font-size:10px;white-space:normal;max-width:130px">${g(r,'rootCause')||'-'}</td>
-          <td style="font-size:10px">${g(r,'partsUsed')||'-'}</td>
-          <td>${g(r,'followUp')||'-'}</td>
-        </tr>`).join(''):'<tr><td colspan="20" style="text-align:center;color:var(--text3);padding:20px">No maintenance requests in this range</td></tr>'}
-        </tbody>
-      </table></div>
+      <div style="overflow-x:auto">
+        ${(()=>{
+          const meReqs = reqs.filter(r=>['ME','MECHANICAL'].includes(String(g(r,'type')||'').toUpperCase()));
+          const eeReqs = reqs.filter(r=>['EE','ELECTRICAL'].includes(String(g(r,'type')||'').toUpperCase()));
+          const utReqs = reqs.filter(r=>['UT','UTILITIES','UTILITY'].includes(String(g(r,'type')||'').toUpperCase()));
+          const pmReqs = reqs.filter(r=>['PM'].includes(String(g(r,'type')||'').toUpperCase()));
+          const THEAD = `<thead><tr>
+            <th>Notif No</th><th>Date</th><th>Time</th><th>Dept</th><th>Machine</th>
+            <th>Priority</th><th>Status</th><th>Description</th><th>Req By</th><th>Shift</th>
+            <th>Arrival</th><th>Closing</th><th>DT(min)</th><th>Waste KG</th>
+            <th>Action Taken</th><th>Root Cause</th><th>Parts Used</th>
+          </tr></thead>`;
+          function inlineRows(list){
+            if(!list.length) return '<tr><td colspan="17" style="text-align:center;color:var(--text3);padding:14px">No requests</td></tr>';
+            return list.map(r=>`<tr>
+              <td style="font-family:monospace;white-space:nowrap">${g(r,'notifNo')||g(r,'id')}</td>
+              <td style="white-space:nowrap">${(()=>{const _rd=g(r,'requestDate')||g(r,'submittedAt')||'';try{const _d=new Date(_rd);return isNaN(_d)?_rd:fmtDate(_d);}catch(e){return _rd||'-';}})()}</td>
+              <td style="white-space:nowrap">${g(r,'requestTime')||'-'}</td>
+              <td>${g(r,'dept')}</td><td>${g(r,'machine')||'-'}</td>
+              <td>${pBadge(g(r,'priority'))}</td><td>${sBadge(g(r,'status'))}</td>
+              <td style="max-width:150px;font-size:10px;white-space:normal">${g(r,'description')||'-'}</td>
+              <td>${g(r,'requestedBy')||'-'}</td><td>${g(r,'shift')||'-'}</td>
+              <td style="font-size:10px;white-space:nowrap">${fmt(g(r,'arrivalTime'))||'-'}</td>
+              <td style="font-size:10px;white-space:nowrap">${fmt(g(r,'closingTime'))||'-'}</td>
+              <td>${diffMin(g(r,'arrivalTime'),g(r,'closingTime'))??'-'}</td>
+              <td style="color:var(--red)">${g(r,'wasteKg')||'-'}</td>
+              <td style="font-size:10px;white-space:normal;max-width:150px">${g(r,'actionTaken')||'-'}</td>
+              <td style="font-size:10px;white-space:normal;max-width:130px">${g(r,'rootCause')||'-'}</td>
+              <td style="font-size:10px">${g(r,'partsUsed')||'-'}</td>
+            </tr>`).join('');
+          }
+          return `
+            <div style="font-weight:700;color:var(--cyan);margin:10px 0 6px">⚙ MECHANICAL (${meReqs.length})</div>
+            <table>${THEAD}<tbody>${inlineRows(meReqs)}</tbody></table>
+
+            <div style="font-weight:700;color:var(--orange);margin:16px 0 6px">⚡ ELECTRICAL (${eeReqs.length})</div>
+            <table>${THEAD}<tbody>${inlineRows(eeReqs)}</tbody></table>
+
+            <div style="font-weight:700;color:var(--green);margin:16px 0 6px">🔧 UTILITIES (${utReqs.length})</div>
+            <table>${THEAD}<tbody>${inlineRows(utReqs)}</tbody></table>
+
+            <div style="font-weight:700;color:var(--purple);margin:16px 0 6px">🛠 PREVENTIVE MAINTENANCE (${pmReqs.length})</div>
+            <table>${THEAD}<tbody>${inlineRows(pmReqs)}</tbody></table>
+          `;
+        })()}
+      </div>
     </div>`;
 };
 
@@ -20068,7 +20278,11 @@ async function sofBgMaintRefresh(force){
       sofSetMeta({ maintLastFetch: new Date().toISOString() });
       sofSetSyncStatus('ok');
       sofUpdateAgo();
-      // Re-render ONLY the active maintenance sub-tab (preserves user's current view)
+      // Re-render ONLY the active maintenance sub-tab (preserves user's current view).
+      // NOTE: 'report' is deliberately excluded — renderMaintReport() resets all filter
+      // inputs (date range/dept/type) to defaults on every call, so auto-refreshing it
+      // every 5s would silently wipe out any filter the user selected. The Report tab
+      // has its own manual 🔄 Sync button for refreshing on demand instead.
       if(APP.currentPage === 'maintenance'){
         const activeTabEl = document.querySelector('#maint-tabs .tab.active');
         let activeTab = 'overview';
@@ -20077,7 +20291,7 @@ async function sofBgMaintRefresh(force){
           if(m) activeTab = m[1];
         }
         const H = {overview:renderMaintOverview, queue:renderMaintQueue, requests:renderMaintRequests,
-                   pmsched:(typeof renderPMSchedule==='function'?renderPMSchedule:null), report:renderMaintReport};
+                   pmsched:(typeof renderPMSchedule==='function'?renderPMSchedule:null)};
         if(H[activeTab]) H[activeTab]();
       }
     }
@@ -20194,7 +20408,7 @@ if(typeof _sofOrigNavigate === 'function'){
   };
 }
 
-// -- Poll maintenance page every 90s while it's open --------------------------
+// -- Poll maintenance page every SOF_MAINT_STALE (5s) while it's open --------
 setInterval(function(){
   if(typeof APP!=="undefined" && APP && APP.currentUser && APP.currentPage === 'maintenance' && !document.hidden){
     sofBgMaintRefresh(false);
