@@ -17152,7 +17152,8 @@ window.openMaintStage=function(id){
     const myType=roleToTypeCode(curRole());
     if(g(r,'type')!==myType){ toast('This request is for the '+g(r,'type')+' team.','error'); return; }
     if(st==='OPEN') window.acceptMaintRequest(id);
-    else if(['ACCEPTED','IN_PROGRESS'].includes(st)) window.openMaintStage4(id);
+    else if(st==='IN_PROGRESS') window.openMaintStage4(id);
+    else if(st==='ACCEPTED') toast('Waiting for production to log arrival/closing times (Stage 3) before you can file the report.','info');
     else toast('No action needed from you at this stage.','info');
     return;
   }
