@@ -387,6 +387,10 @@ tr:hover td{background:rgba(255,255,255,.02)}
   .header-right .header-time{display:none}
   .header-right .conn-debug{display:none}
   .header-right .btn-outline{display:none}
+  /* Production Report Excel/PDF buttons stay visible on mobile (icon-only, compact) */
+  #header-excel-btn,#header-pdf-btn{display:inline-flex !important;font-size:0;padding:6px 8px;min-width:30px;justify-content:center}
+  #header-excel-btn::before{content:'📥';font-size:14px}
+  #header-pdf-btn::before{content:'📄';font-size:14px}
   /* Show only sync button on mobile */
   #sync-now-btn{font-size:10px;padding:4px 8px}
   #user-role-badge{display:none}
@@ -631,9 +635,6 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <div class="nav-item" onclick="navigate('effcenter')">
           <div class="nav-icon">🎯</div><span class="nav-text">Efficiency Center</span>
         </div>
-        <div class="nav-item" onclick="navigate('downtime')">
-          <div class="nav-icon">⏸</div><span class="nav-text">Downtime Center</span>
-        </div>
       </div>
       <div class="nav-group">
         <div class="nav-label">JOBS</div>
@@ -661,9 +662,6 @@ tr:hover td{background:rgba(255,255,255,.02)}
       </div>
       <div class="nav-group">
         <div class="nav-label">SYSTEM</div>
-        <div class="nav-item" onclick="navigate('cache')">
-          <div class="nav-icon">🗄️</div><span class="nav-text">Cache</span>
-        </div>
         <div class="nav-item" onclick="navigate('settings')">
           <div class="nav-icon">⚙</div><span class="nav-text">Settings</span>
         </div>
@@ -717,7 +715,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
           <span id="conn-icon">●</span><span id="conn-text">Connected</span>
         </div>
         <div class="live-badge" id="live-badge" style="display:none"><div class="live-dot"></div>LIVE</div>
-        <div id="last-sync-indicator" style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.2;font-size:10px;color:var(--text3);margin-right:4px;cursor:pointer" onclick="navigate('cache')" title="Click to open Cache tab">
+        <div id="last-sync-indicator" style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.2;font-size:10px;color:var(--text3);margin-right:4px;cursor:pointer" onclick="window._settingsJumpTo='cachebackup';navigate('settings')" title="Click to open Cache & Backup settings">
           <span style="text-transform:uppercase;letter-spacing:.04em">Last Sync</span>
           <span id="last-sync-value" style="color:var(--text2);font-weight:600">-</span>
         </div>
@@ -728,8 +726,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
           title="Enable mobile notifications"
           style="background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:14px;padding:4px 8px;color:var(--text2);transition:all .2s;position:relative"
           >🔔<span id="notif-cross" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;line-height:14px;text-align:center;font-style:normal">✕</span></button>
-        <button class="btn btn-outline btn-sm" onclick="exportData()">📥 Excel</button>
-        <button class="btn btn-outline btn-sm" onclick="exportPDF()">📄 PDF</button>
+        <button class="btn btn-outline btn-sm" id="header-excel-btn" onclick="window.downloadProductionReportExcel()" title="Download Production Report (Excel/CSV)">📥 Excel</button>
+        <button class="btn btn-outline btn-sm" id="header-pdf-btn" onclick="window.generateProductionReport()" title="Generate Production Report (PDF)">📄 PDF</button>
         <!-- User menu dropdown -->
         <div style="position:relative" id="user-menu-wrap">
           <div id="user-role-badge"
@@ -1618,6 +1616,13 @@ function renderDashboard(container) {
   const upDispatch = dispatchTons(1, ['UP_DISPATCH_KG','UP_DISPATCH','UP_DISPATCH_QTY','UP_KG','UP']);
   const ufDispatch = dispatchTons(2, ['UF_DISPATCH_KG','UF_DISPATCH','UF_DISPATCH_QTY','UF_KG','UF']);
   const exportDispatch = dispatchTons(3, ['EXPORT_DISPATCH_KG','EXPORT_DISPATCH','EXPORT_DISPATCH_QTY','EXPORT_KG','EXPORT']);
+  // Bag/Pouch Dispatched — Dispatch Master rows where JOB_TYPE contains "BAG", Column L (ROLLS/BAGS) summed
+  const bagPouchDispatchedKg = rowsMonth(APP.dispatchData||[], month).reduce((a,r)=>{
+    const jt = String(r['JOB_TYPE']||r['JOBTYPE']||r['JOB TYPE']||'').trim().toUpperCase();
+    if(!jt.includes('BAG')) return a;
+    const qty = getAny(r,['ROLLSBAGS','ROLLS/BAGS','ROLLS_BAGS'],'');
+    return a + (qty!==''?n(qty):0);
+  }, 0);
 
   const inkRecords = rowsMonth(APP.inkData||[], month).filter(r=>!r.type);
   const inkConsumedKg = inkRecords.reduce((a,r)=>a+n(r.INK_CONSUMED_KG),0);
@@ -1730,6 +1735,14 @@ function renderDashboard(container) {
         <div class="kpi-label">Export Dispatch (Tons)</div>
         <div class="kpi-target">Target: <span>100</span></div>
         <div class="kpi-progress"><div class="kpi-progress-bar" style="width:${targetProgress(exportDispatch,100)}%;background:linear-gradient(90deg,#a371f7,#d2a8ff)"></div></div>
+      </div>
+      <div class="kpi-card pink" onclick="navigate('dispatch')">
+        <div class="kpi-card-head">
+          <div class="kpi-icon" style="background:rgba(247,120,186,.1)">🛍</div>
+        </div>
+        <div class="kpi-value">${Math.round(bagPouchDispatchedKg).toLocaleString()}</div>
+        <div class="kpi-label">Bag Dispatch</div>
+        <div class="kpi-target">This month · Rolls/Bags (Job Type = BAG)</div>
       </div>
       <div class="kpi-card ${wasteP<=5?'green':'red'}" onclick="navigate('wastage')">
         <div class="kpi-card-head">
@@ -2809,26 +2822,46 @@ function renderDeptPage(container, dept) {
   }
 }
 
+// Format a single DEPT_DETAIL_FIELDS value for display — dates, percentages,
+// and PCS/KG numbers get sensible formatting; everything else falls back to
+// the raw value with comma-separated thousands if numeric.
+function _fmtDetailFieldValue(field, r){
+  const raw = r[field];
+  if(field==='PRODUCTION_DATE') return fmtDDMMYYYY(r.date||raw||'');
+  if(field==='SAP_STATUS') return badgeHTML(r.sapStatus||raw||'');
+  if(field==='NO_OF_JOB_SETTING'){
+    // Real sheet column is "COUNT OF JOB " (trailing space) → normalizes to COUNT_OF_JOB
+    const v = firstRealValue(r,['NO_OF_JOB_SETTING','COUNT_OF_JOB','JOB_SETTING','jobSetting'],'');
+    return v===''?'-':(isNaN(Number(v))?String(v):Number(v).toLocaleString());
+  }
+  if(/_PCT$/.test(field)){
+    // Real sheet headers like "%EE", "%OEE", "%TOTAL WASTE" normalize to EE/OEE/
+    // TOTAL_WASTE (the % sign is stripped, no _PCT suffix survives) — check both
+    // the exact field name and the un-suffixed alias before falling back to 0.
+    const aliasKey = field.replace(/_PCT$/,'');
+    const rawPct = firstRealValue(r,[field,aliasKey],'');
+    const v = Number(rawPct||0);
+    return `<span style="color:${v>5?'var(--red)':'var(--green)'}">${v.toFixed(2)}%</span>`;
+  }
+  if(raw===undefined||raw===null||raw===''){
+    // Fall back to known computed convenience fields for common columns
+    if(field==='PRODUCTION_PCS') return r.productionPcs?Math.round(r.productionPcs).toLocaleString():'-';
+    if(field==='PRODUCTION_KG') return r.productionKg?Math.round(r.productionKg).toLocaleString():'-';
+    if(field==='PRODUCTION_METER') return r.productionMeter?Math.round(r.productionMeter).toLocaleString():'-';
+    return '-';
+  }
+  const n = Number(String(raw).replace(/,/g,''));
+  if(!isNaN(n) && String(raw).trim()!=='' && /^[\d.,\-]+$/.test(String(raw).trim())){
+    return n.toLocaleString(undefined,{maximumFractionDigits:2});
+  }
+  return String(raw);
+}
 function renderDeptRows(data,dept){
+  const fields = DEPT_DETAIL_FIELDS[dept]||DEPT_DETAIL_FIELDS.Printing;
   return data.map(r=>`
     <tr onclick="showRecord(${r.id})" style="cursor:pointer">
-      <td style="font-size:11px">${fmtDDMMYYYY(r.date)}</td>
-      <td style="font-size:11px;color:var(--text2)">${r.machine}</td>
-      <td><span class="badge badge-blue">${r.shift}</span></td>
-      <td style="font-size:11px">${r.incharge}</td>
-      <td style="color:var(--cyan);font-family:monospace;font-size:11px">${r.sapPO}</td>
-      <td style="font-size:11px">${r.job}</td>
-      <td style="font-size:11px">${r.customer}</td>
-      <td style="font-weight:600">${r.production}</td>
-      <td>${r.waste}</td>
-      <td style="color:${r.wastePercent>5?'var(--red)':'var(--green)'}">${Number(r.wastePercent||0).toFixed(2)}%</td>
-      <td style="color:${r.downtime>120?'var(--red)':'var(--text)'}">${r.downtime}</td>
-      <td style="color:${r.ee>=75?'var(--green)':'var(--yellow)'}">${Number(r.ee||0).toFixed(2)}%</td>
-      <td>${Number(r.oee||0).toFixed(2)}%</td>
-      <td>${badgeHTML(r.sapStatus)}</td>
-      <td>
-        ${hasPermission('edit')?`<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();editRecord(${r.id})">Edit</button>`:''}
-      </td>
+      ${fields.map(f=>`<td style="font-size:11px;white-space:nowrap">${_fmtDetailFieldValue(f,r)}</td>`).join('')}
+      <td>${hasPermission('edit')?`<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();editRecord(${r.id})">Edit</button>`:''}</td>
     </tr>`).join('');
 }
 
@@ -3151,20 +3184,34 @@ function renderShiftTab(dept){
 // =============================================
 // QUALITY / NCR
 // =============================================
+// Real Quality/NCR sheet columns (matches QUALITY_IMPORT sheet exactly, header row 5)
+const NCR_DETAIL_FIELDS = ['NCR_DATE','NCR_NO','SHIFT','SHIFT_INCHARGE','DEPARTMENT','SAP_SFG_NO','JOB_NAME',
+  'NCR_REASON','NCR_KG','NCR_PCS','HOLD_MATERIAL_KG','CUSTOMER_COMPLAINT_NO','CUSTOMER_COMPLAINT_DATE',
+  'COMPLAINT_TYPE','COMPLAINT_DESCRIPTION','ROOT_CAUSE','CORRECTIVE_ACTION','PREVENTIVE_ACTION'];
+function _ncrFieldLabel(f){ return f.replace(/_/g,' '); }
+function _fmtNcrFieldValue(field,r){
+  const raw = r[field];
+  if(field==='NCR_DATE'||field==='CUSTOMER_COMPLAINT_DATE'){
+    if(!raw) return '-';
+    try{ const d=new Date(raw); return isNaN(d)?String(raw):fmtDDMMYYYY(d.toISOString()); }catch(e){ return String(raw); }
+  }
+  if(raw===undefined||raw===null||raw==='') return '-';
+  const n=Number(String(raw).replace(/,/g,''));
+  if(!isNaN(n) && /^[\d.,\-]+$/.test(String(raw).trim())) return n.toLocaleString(undefined,{maximumFractionDigits:2});
+  return String(raw);
+}
 function renderQuality(container){
   const d=APP.ncrData.filter(x=>x.month===APP.currentMonth);
-  const open=d.filter(x=>x.status==='Open').length;
-  const closed=d.filter(x=>x.status==='Closed').length;
-  const critical=d.filter(x=>x.severity==='Critical').length;
+  const all=APP.ncrData; // KPI cards show overall sum across ALL data, not just the filtered month
   const months6=getLast6Months(APP.currentMonth);
   const ncrTrend=months6.map(m=>APP.ncrData.filter(x=>x.month===m).length);
-  
+
   container.innerHTML=`
     <div class="stats-row">
-      <div class="stat-box"><div class="label">Total NCR</div><div class="value" style="color:${d.length>10?'var(--red)':'var(--green)'}">${d.length}</div><div class="sub">Target &lt; 10</div></div>
-      <div class="stat-box"><div class="label">Open NCRs</div><div class="value" style="color:var(--red)">${open}</div><div class="sub">Pending action</div></div>
-      <div class="stat-box"><div class="label">Closed</div><div class="value" style="color:var(--green)">${closed}</div><div class="sub">Resolved</div></div>
-      <div class="stat-box"><div class="label">Critical</div><div class="value" style="color:var(--red)">${critical}</div><div class="sub">Needs immediate action</div></div>
+      <div class="stat-box"><div class="label">Total NCR</div><div class="value" style="color:${all.length>10?'var(--red)':'var(--green)'}">${all.length}</div><div class="sub">All-time</div></div>
+      <div class="stat-box"><div class="label">Total NCR KG</div><div class="value" style="color:var(--red)">${Math.round(all.reduce((a,r)=>a+Number(r.NCR_KG||0),0)).toLocaleString()}</div><div class="sub">All-time</div></div>
+      <div class="stat-box"><div class="label">Total NCR PCS</div><div class="value">${Math.round(all.reduce((a,r)=>a+Number(r.NCR_PCS||0),0)).toLocaleString()}</div><div class="sub">All-time</div></div>
+      <div class="stat-box"><div class="label">Hold Material KG</div><div class="value" style="color:var(--yellow)">${Math.round(all.reduce((a,r)=>a+Number(r.HOLD_MATERIAL_KG||0),0)).toLocaleString()}</div><div class="sub">All-time</div></div>
     </div>
     <div class="charts-grid">
       <div class="chart-card">
@@ -3179,27 +3226,24 @@ function renderQuality(container){
     <div class="section-header">
       <div class="section-title">NCR Records</div>
       <div class="section-actions">
-  
         <button class="btn btn-outline btn-sm" onclick="exportData()">Export</button>
       </div>
     </div>
-    <div class="table-card">
-      <table><thead><tr><th>NCR No</th><th>Month</th><th>Dept</th><th>Type</th><th>Qty (KG)</th><th>Severity</th><th>Customer</th><th>Status</th><th>Action</th></tr></thead>
+    <div class="table-card"><div style="overflow-x:auto">
+      <table><thead><tr>${NCR_DETAIL_FIELDS.map(f=>`<th style="white-space:nowrap">${_ncrFieldLabel(f)}</th>`).join('')}<th>Action</th></tr></thead>
       <tbody>${d.map(r=>`<tr>
-        <td style="color:var(--cyan);font-weight:600">${r.ncr}</td>
-        <td>${r.month}</td><td>${r.dept}</td><td>${r.type}</td>
-        <td>${r.qty}</td><td>${badgeHTML(r.severity)}</td><td>${r.customer}</td><td>${badgeHTML(r.status)}</td>
+        ${NCR_DETAIL_FIELDS.map(f=>`<td style="font-size:11px;white-space:nowrap">${_fmtNcrFieldValue(f,r)}</td>`).join('')}
         <td>${hasPermission('edit')?`<button class="btn btn-outline btn-sm" onclick="toast('NCR edit feature','info')">Edit</button>`:''}</td>
       </tr>`).join('')}
       </tbody></table>
-    </div>`;
+    </div></div>`;
   
   setTimeout(()=>{
     const cOpts={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6e7681',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#6e7681',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}}}};
-    const ncrDeptTrendData=['Printing','Lamination','Slitting','Bag Making'].map((dep,di)=>({label:dep,data:months6.map(m=>APP.ncrData.filter(x=>x.month===m&&x.dept===dep).length),backgroundColor:['rgba(57,208,216,.7)','rgba(63,185,80,.7)','rgba(163,113,247,.7)','rgba(240,136,62,.7)'][di],borderRadius:3}));
+    const ncrDeptTrendData=['Printing','Lamination','Slitting','Bag Making'].map((dep,di)=>({label:dep,data:months6.map(m=>APP.ncrData.filter(x=>x.month===m&&x.DEPARTMENT===dep).length),backgroundColor:['rgba(57,208,216,.7)','rgba(63,185,80,.7)','rgba(163,113,247,.7)','rgba(240,136,62,.7)'][di],borderRadius:3}));
     APP.chartInstances.ncrTrend=new Chart(document.getElementById('ncr-trend-chart'),{type:'bar',data:{labels:months6,datasets:ncrDeptTrendData},options:{...cOpts,plugins:{legend:{display:true,labels:{color:'#8b949e',font:{size:10},boxWidth:10}},upValueLabels:{stackedTotals:true,unit:'none',font:'600 9px Inter,sans-serif',formatFn:(v)=>v>0?Math.round(v)+'':''}},scales:{...cOpts.scales,x:{...cOpts.scales.x,stacked:true},y:{...cOpts.scales.y,stacked:true}}}});
     const depts=['Printing','Lamination','Slitting','Bag Making'];
-    const deptNCR=depts.map(dep=>APP.ncrData.filter(x=>x.month===APP.currentMonth&&x.dept===dep).length);
+    const deptNCR=depts.map(dep=>APP.ncrData.filter(x=>x.month===APP.currentMonth&&x.DEPARTMENT===dep).length);
     APP.chartInstances.ncrDept=new Chart(document.getElementById('ncr-dept-chart'),{type:'doughnut',data:{labels:depts,datasets:[{data:deptNCR,backgroundColor:['rgba(57,208,216,.7)','rgba(63,185,80,.7)','rgba(163,113,247,.7)','rgba(240,136,62,.7)'],borderWidth:0,hoverOffset:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'right',labels:{color:'#8b949e',font:{size:10},boxWidth:10,padding:8}}}}});
   },100);
 }
@@ -3288,7 +3332,9 @@ function renderEfficiency(container){
       <tbody>${APP.machines.filter(m=>m.dept!=='Bag Making'&&m.dept!=='Ink'&&m.dept!=='Quality').map(m=>{
         const md=d.filter(r=>r.machine===m.code);
         const ee=avg(md,'ee').toFixed(1); const oee=avg(md,'oee').toFixed(1); const dt=sum(md,'downtime');
-        const util=(Math.random()*30+60).toFixed(1);
+        // Real utilization = (Total Job Time - Downtime) / Total Job Time × 100
+        const totalJobMin = md.reduce((a,r)=>a+Number(r.TOTAL_JOB_TIME_MIN||r.totalJobTimeMin||0),0);
+        const util = totalJobMin>0 ? Math.max(0,Math.min(100,((totalJobMin-dt)/totalJobMin*100))).toFixed(1) : '0.0';
         return `<tr><td style="font-weight:500">${m.name}</td><td>${m.dept}</td><td>${md.length}</td>
           <td style="color:${ee>=75?'var(--green)':'var(--yellow)'}">${ee}%</td>
           <td>${oee}%</td><td style="color:var(--orange)">${dt}</td>
@@ -5872,7 +5918,7 @@ window.generateProductionReport = function(monthOverride){
     return ymKey(raw)===month;
   });
   const disp = (APP.dispatchData||[]).filter(r=>{
-    const raw = r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE||'';
+    const raw = r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE||r.DATE||r.DISPATCHED_DATE||r['DISPATCH DATE']||'';
     return ymKey(raw)===month;
   });
 
@@ -5892,6 +5938,10 @@ window.generateProductionReport = function(monthOverride){
     const keys=['DISPATCHED (KG)','DISPATCHED_KG','DISPATCHED KG','DISPATCH KG','DISPATCHEDKG','DISPATCHED','QTY KG','QUANTITY KG','KG','QTY','QUANTITY'];
     for(const k of keys){ if(r[k]!==undefined && r[k]!=='') return n(r[k]); }
     return 0;
+  }
+  function isBagJobType(r){
+    const jt = String(r['JOB_TYPE']||r['JOBTYPE']||r['JOB TYPE']||'').trim().toUpperCase();
+    return jt.includes('BAG');
   }
   function dispatchRowsForDay(day){
     return disp.filter(r=>dayOfMonth(r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE)===day);
@@ -5914,7 +5964,8 @@ window.generateProductionReport = function(monthOverride){
     const upTon = dr.filter(r=>resolveDispatchCategory(r)==='UP').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
     const ufTon = dr.filter(r=>resolveDispatchCategory(r)==='UF').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
     const expQty= dr.filter(r=>resolveDispatchCategory(r)==='Export').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
-    const bagPouchCount = dr.reduce((a,r)=>a+n(r.BAG_POUCH_QTY||r.bagPouchQty),0);
+    // Bag/Pouch = Dispatch Master rows where JOB_TYPE contains "BAG" — sum Column L (ROLLS/BAGS)
+    const bagPouchCount = dr.filter(isBagJobType).reduce((a,r)=>a+n(r.ROLLSBAGS||r['ROLLS/BAGS']||r['ROLLS_BAGS']),0);
 
     return {
       day, prMeter, prTon:(pr.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000),
@@ -5935,40 +5986,100 @@ window.generateProductionReport = function(monthOverride){
   const f2=x=>(x||0).toFixed(2);
   const f0=x=>Math.round(x||0).toLocaleString();
   const genTime = new Date().toLocaleString('en-PK',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true});
+  const dispatchWarning = (disp.length===0 && (APP.dispatchData||[]).length>0)
+    ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:10px;color:#92400e">⚠ Dispatch data exists (${(APP.dispatchData||[]).length} total rows) but none matched period <b>${month}</b> — check the date field on the Dispatch sheet, or Sync Now to refresh.</div>`
+    : (disp.length===0 && (APP.dispatchData||[]).length===0)
+    ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:10px;color:#92400e">⚠ No Dispatch data loaded at all — click Sync Now on the Dispatch tab, then regenerate this report.</div>`
+    : '';
+  const nRows = rows.length;
 
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><title>Production Report - ${month}</title>
   <style>
-    body{font-family:Arial,Helvetica,sans-serif;margin:24px;color:#1e293b;font-size:12px}
-    .hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
-    .logo{font-weight:800;color:#cc0000;font-size:14px}
-    .title{text-align:center;margin:10px 0 2px}
-    .title h1{color:#cc0000;font-size:22px;margin:0;letter-spacing:1px}
-    .sub{text-align:center;color:#64748b;font-size:11px;margin-bottom:16px}
-    .kpi-row{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
-    .kpi{flex:1;min-width:140px;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px;border-top:3px solid #ccc}
-    .kpi .lbl{font-size:10px;color:#64748b;text-transform:uppercase;font-weight:700}
-    .kpi .val{font-size:18px;font-weight:800;margin:2px 0}
-    .kpi .sub2{font-size:10px;color:#94a3b8}
-    table{width:100%;border-collapse:collapse;font-size:10.5px}
-    th,td{border:1px solid #e2e8f0;padding:4px 6px;text-align:right}
-    th{background:#f1f5f9;font-size:9.5px;text-transform:uppercase;color:#475569}
-    td:first-child,th:first-child{text-align:left}
-    .grp{text-align:center;font-weight:700;background:#f8fafc}
-    tr.total td{font-weight:800;background:#f1f5f9}
-    .foot{margin-top:14px;font-size:10px;color:#94a3b8}
-    @media print{ body{margin:8px} }
+    @page{ size: A4 landscape; margin: 6mm; }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{font-family:'Segoe UI',Arial,Helvetica,sans-serif;margin:0;padding:10px 14px;color:#1e293b;font-size:11px;background:#fff}
+    .hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;border-bottom:2px solid #1e3a5f;padding-bottom:4px}
+    .logo{font-weight:800;color:#cc0000;font-size:13px;letter-spacing:.5px}
+    .hdr-right{font-size:8px;color:#94a3b8;text-align:right}
+    .title{text-align:center;margin:5px 0 1px}
+    .title h1{color:#1e3a5f;font-size:16px;margin:0;letter-spacing:1.2px;font-weight:800}
+    .sub{text-align:center;color:#64748b;font-size:9px;margin-bottom:7px}
+    .sub b{color:#1e3a5f}
+
+    /* KPI cards: clear 3-tier hierarchy — Department / Tons / Meters */
+    .kpi-row{display:flex;gap:6px;margin-bottom:7px}
+    .kpi{flex:1;border:1px solid #e2e8f0;border-radius:6px;padding:5px 4px;border-top:3px solid #ccc;text-align:center;background:#fafbfc}
+    .kpi .dept{font-size:9px;color:#1e3a5f;text-transform:uppercase;font-weight:800;letter-spacing:.2px;margin-bottom:2px}
+    .kpi .tons{font-size:14px;font-weight:800;color:#0f172a;line-height:1.05}
+    .kpi .tons .unit{font-size:8px;font-weight:600;color:#64748b;margin-left:2px}
+    .kpi .meters{font-size:8.5px;color:#64748b;margin-top:2px;padding-top:2px;border-top:1px dashed #e2e8f0}
+    .kpi .meters b{color:#334155}
+
+    table{width:100%;border-collapse:collapse;font-size:8px;table-layout:fixed}
+    th,td{border:1px solid #e2e8f0;padding:1.5px 3px;text-align:right;overflow:hidden;line-height:1.2}
+    th{background:#1e3a5f;color:#fff;font-size:7px;text-transform:uppercase;font-weight:700;letter-spacing:.1px}
+    td:first-child,th:first-child{text-align:left;font-weight:600}
+    .grp{text-align:center;font-weight:700;background:#2d4a6b}
+    tr.total td{font-weight:800;background:#f1f5f9;border-top:2px solid #1e3a5f}
+    .foot{margin-top:5px;font-size:7.5px;color:#94a3b8;display:flex;justify-content:space-between}
+    .no-print{margin-top:10px;text-align:center;display:flex;gap:10px;justify-content:center}
+
+    @media print{
+      body{padding:0;font-size:10px}
+      .no-print{display:none}
+      .kpi .tons{font-size:13px}
+      table{font-size:7.5px}
+      th,td{padding:1.5px 2.5px}
+    }
+    /* Screen preview: larger, comfortable reading size — print rules above
+       only apply when actually printing/saving as PDF */
+    @media screen{
+      body{max-width:1100px;margin:0 auto;padding:20px 24px;font-size:12px}
+      .title h1{font-size:20px}
+      .kpi .dept{font-size:11px}
+      .kpi .tons{font-size:19px}
+      .kpi .meters{font-size:10.5px}
+      table{font-size:10.5px}
+      th{font-size:9px}
+      th,td{padding:4px 6px}
+    }
   </style></head><body>
-  <div class="hdr"><span class="logo">UP</span><span></span></div>
+  <div class="hdr">
+    <span class="logo"><img src="https://upco-production.github.io/erp-dashboard/upco-logo-sq.png" alt="UP" style="height:22px;vertical-align:middle;margin-right:6px" onerror="this.style.display='none'">UNIVERSAL PACKAGING</span>
+    <span class="hdr-right">Confidential — Internal Use Only</span>
+  </div>
   <div class="title"><h1>PRODUCTION REPORT</h1></div>
   <div class="sub">Universal Packaging Pvt. Ltd. &middot; Period: <b>${month}</b></div>
+  ${dispatchWarning}
 
   <div class="kpi-row">
-    <div class="kpi" style="border-top-color:#22d3ee"><div class="lbl">Printing</div><div class="val">${f2(tot.prTon)} Ton</div><div class="sub2">Meter: ${f0(tot.prMeter)}</div></div>
-    <div class="kpi" style="border-top-color:#a371f7"><div class="lbl">Lamination</div><div class="val">${f2(tot.laTon)} Ton</div><div class="sub2">Meter: ${f0(tot.laMeter)}</div></div>
-    <div class="kpi" style="border-top-color:#8b5cf6"><div class="lbl">Slitting</div><div class="val">${f2(tot.slTon)} Ton</div><div class="sub2">Meter: ${f0(tot.slMeter)}</div></div>
-    <div class="kpi" style="border-top-color:#f0883e"><div class="lbl">Bag Making</div><div class="val">${f2(tot.bgTon)} Ton</div><div class="sub2">Pcs: ${f0(tot.bgPcs)}</div></div>
-    <div class="kpi" style="border-top-color:#f778ba"><div class="lbl">Dispatch</div><div class="val">${f2(tot.upTon+tot.ufTon+tot.expQty)} Ton</div><div class="sub2">Bag/Pouch: ${f0(tot.bagPouchCount)}</div></div>
+    <div class="kpi" style="border-top-color:#22d3ee">
+      <div class="dept">Printing</div>
+      <div class="tons">${f2(tot.prTon)}<span class="unit">TON</span></div>
+      <div class="meters">Meters: <b>${f0(tot.prMeter)}</b></div>
+    </div>
+    <div class="kpi" style="border-top-color:#a371f7">
+      <div class="dept">Lamination</div>
+      <div class="tons">${f2(tot.laTon)}<span class="unit">TON</span></div>
+      <div class="meters">Meters: <b>${f0(tot.laMeter)}</b></div>
+    </div>
+    <div class="kpi" style="border-top-color:#8b5cf6">
+      <div class="dept">Slitting</div>
+      <div class="tons">${f2(tot.slTon)}<span class="unit">TON</span></div>
+      <div class="meters">Meters: <b>${f0(tot.slMeter)}</b></div>
+    </div>
+    <div class="kpi" style="border-top-color:#f0883e">
+      <div class="dept">Bag Making</div>
+      <div class="tons">${f2(tot.bgTon)}<span class="unit">TON</span></div>
+      <div class="meters">Pcs: <b>${f0(tot.bgPcs)}</b></div>
+    </div>
+    <div class="kpi" style="border-top-color:#f778ba">
+      <div class="dept">Dispatch</div>
+      <div class="tons">${f2(tot.upTon+tot.ufTon+tot.expQty)}<span class="unit">TON</span></div>
+      <div class="meters">Bag/Pouch: <b>${f0(tot.bagPouchCount)}</b></div>
+    </div>
   </div>
 
   <table>
@@ -5985,14 +6096,16 @@ window.generateProductionReport = function(monthOverride){
       </tr>
     </thead>
     <tbody>
-      ${rows.map(r=>`<tr>
+      ${rows.map(r=>{
+        const isEmpty = !r.prMeter && !r.laMeter && !r.slMeter && !r.bgTon && !r.bgPcs && !r.upTon && !r.ufTon && !r.expQty;
+        return `<tr${isEmpty?' style="color:#9ca3af;background:#f8fafc"':''}>
         <td>${String(r.day).padStart(2,'0')}-${month}</td>
         <td>${f0(r.prMeter)}</td><td>${f2(r.prTon)}</td>
         <td>${f0(r.laMeter)}</td><td>${f2(r.laTon)}</td>
         <td>${f0(r.slMeter)}</td><td>${f2(r.slTon)}</td>
         <td>${f2(r.bgTon)}</td><td>${f0(r.bgPcs)}</td>
         <td>${f2(r.upTon)}</td><td>${f2(r.ufTon)}</td><td>${f2(r.expQty)}</td><td>${f0(r.bagPouchCount)}</td>
-      </tr>`).join('')}
+      </tr>`;}).join('')}
       <tr class="total">
         <td>GRAND TOTAL</td>
         <td>${f0(tot.prMeter)}</td><td>${f2(tot.prTon)}</td>
@@ -6004,10 +6117,12 @@ window.generateProductionReport = function(monthOverride){
     </tbody>
   </table>
 
-  <div class="foot">Generated ${genTime} &middot; Universal Packaging ERP<br>
-  <i>Note: This is a system-generated report. Minor discrepancies may occur.</i></div>
+  <div class="foot">
+    <span>Generated ${genTime} &middot; Universal Packaging ERP</span>
+    <span><i>System-generated report — minor discrepancies may occur</i></span>
+  </div>
 
-  <div class="no-print" style="margin-top:16px;text-align:center;display:flex;gap:10px;justify-content:center">
+  <div class="no-print">
     <button onclick="window.print()" style="background:#1e3a5f;color:#fff;border:none;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">🖨 Print / Save PDF</button>
     <button onclick="window.opener && window.opener.downloadProductionReportExcel && window.opener.downloadProductionReportExcel('${month}')" style="background:#16a34a;color:#fff;border:none;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">📊 Download Excel</button>
   </div>
@@ -6045,6 +6160,10 @@ window.downloadProductionReportExcel = function(monthOverride){
     const keys=['DISPATCHED (KG)','DISPATCHED_KG','DISPATCHED KG','DISPATCH KG','DISPATCHEDKG','DISPATCHED','QTY KG','QUANTITY KG','KG','QTY','QUANTITY'];
     for(const k of keys){ if(r[k]!==undefined && r[k]!=='') return n(r[k]); } return 0;
   }
+  function isBagJobType(r){
+    const jt = String(r['JOB_TYPE']||r['JOBTYPE']||r['JOB TYPE']||'').trim().toUpperCase();
+    return jt.includes('BAG');
+  }
   function dispatchRowsForDay(day){ return disp.filter(r=>dayOfMonth(r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE)===day); }
 
   const rows = days.map(day=>{
@@ -6055,7 +6174,7 @@ window.downloadProductionReportExcel = function(monthOverride){
     const upTon=dr.filter(r=>resolveDispatchCategory(r)==='UP').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
     const ufTon=dr.filter(r=>resolveDispatchCategory(r)==='UF').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
     const expQty=dr.filter(r=>resolveDispatchCategory(r)==='Export').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
-    const bagPouchCount=dr.reduce((a,r)=>a+n(r.BAG_POUCH_QTY||r.bagPouchQty),0);
+    const bagPouchCount=dr.filter(isBagJobType).reduce((a,r)=>a+n(r.ROLLSBAGS||r['ROLLS/BAGS']||r['ROLLS_BAGS']),0);
     return {
       day, prMeter, prTon:(pr.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000),
       laMeter, laTon:(la.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000),
@@ -6170,15 +6289,21 @@ function renderSettings(container){
   // in a read-only state.
   const allTabs = ['Company','Theme','Sheet IDs','App Script','Logo','Targets','Calculation Settings','Users','Machines','Vendors','Audit Log','About','Cache & Backup'];
   const visibleTabs = isMainAdminUser ? allTabs : allTabs.filter(t => t !== 'Calculation Settings' && t !== 'Cache & Backup');
+  // Support jumping straight to a specific tab (e.g. from the header's "Last
+  // Sync" indicator → Cache & Backup) via a one-shot flag set before navigate().
+  const jumpTo = window._settingsJumpTo; window._settingsJumpTo = null;
+  const jumpIdx = jumpTo ? visibleTabs.findIndex(t=>t.toLowerCase().replace(/ /g,'')===jumpTo) : -1;
+  const activeIdx = jumpIdx > -1 ? jumpIdx : 0;
   container.innerHTML=`
     <div class="settings-layout">
       <div class="settings-tabs">
         ${visibleTabs.map((t,i)=>`
-          <div class="settings-tab${i===0?' active':''}" onclick="switchSettingsTab('${t.toLowerCase().replace(/ /g,'')}',this)">${t}</div>`).join('')}
+          <div class="settings-tab${i===activeIdx?' active':''}" onclick="switchSettingsTab('${t.toLowerCase().replace(/ /g,'')}',this)">${t}</div>`).join('')}
       </div>
       <div class="settings-content" id="settings-panel"></div>
     </div>`;
-  renderSettingsCompany();
+  const fns={company:renderSettingsCompany,theme:renderSettingsTheme,sheetids:renderSettingsSheets,appscript:renderSettingsScript,logo:renderSettingsLogo,targets:renderSettingsTargets,calculationsettings:renderSettingsCalculation,users:renderSettingsUsers,machines:renderSettingsMachines,vendors:renderSettingsVendors,auditlog:renderSettingsAuditLog,about:renderSettingsAbout,cachebackup:renderSettingsCacheBackup};
+  (fns[visibleTabs[activeIdx].toLowerCase().replace(/ /g,'')] || renderSettingsCompany)();
 }
 
 function switchSettingsTab(tab,el){
@@ -7572,6 +7697,13 @@ function renderSettingsCacheBackup(){
       else if(obj && obj.data && Array.isArray(obj.data)){ records=obj.data.length; ts=obj.ts||obj.savedAt||null; }
       else if(obj && obj.ts){ ts=obj.ts; }
       else if(obj && obj.savedAt){ ts=new Date(obj.savedAt).getTime(); }
+      // Fallback: these caches are all written together in the same periodic
+      // save cycle, so the shared upc_meta_v2.savedAt timestamp accurately
+      // reflects when this cache was last written too (plain arrays don't
+      // carry their own embedded timestamp).
+      if(!ts){
+        try{ const m=JSON.parse(localStorage.getItem('upc_meta_v2')||'{}'); if(m.savedAt) ts=m.savedAt; }catch(e){}
+      }
       const ageMs = ts ? (Date.now()-new Date(ts).getTime()) : null;
       const age = ageMs!=null ? (ageMs<60000?Math.round(ageMs/1000)+'s ago':ageMs<3600000?Math.round(ageMs/60000)+'m ago':(ageMs/3600000).toFixed(1)+'h ago') : 'Unknown';
       const fresh = ageMs!=null && ageMs < 3600000;
@@ -8333,10 +8465,10 @@ const SHEET_ENDPOINTS = {
 };
 const MASTER_STATUS = { system:'Local', planning:'Local', production:'Local', material:'Local', wip:'Local', ink:'Local' };
 const DEPT_DETAIL_FIELDS = {
-  'Printing':['PRODUCTION_DATE','SHIFT','SHIFT_INCHARGE','SAP_STATUS','MACHINE_NO','SAP_SFG_NO','JOB_NAME','JOB_SETTING','TOTAL_JOB_TIME_MIN','PRODUCTION_KG','PRODUCTION_METER','PRODUCTION_MIN','AVERAGE_SPEED','RHI','EE_PCT','OEE_PCT','PROCESS_WASTE','PLAIN_WASTE','APPROVAL_WASTE','SHADE_CARD_WASTE','TECHNICAL_WASTE','TOTAL_WASTE_KG','TOTAL_WASTE_PCT','PROCESS_DOWNTIME_MIN','APPROVAL_DOWNTIME_MIN','MECHANICAL_DOWNTIME_MIN','ELECTRICAL_DOWNTIME_MIN','UTILITIES_DOWNTIME_MIN','PREVENTIVE_MAINTENANCE_MIN','TOTAL_TECHNICAL_DOWNTIME_MIN','PLANNING_DOWNTIME_MIN','UNPLANNED_DOWNTIME_MIN','SAP_MATERIAL_CODE','SUBSTRATE','MATERIAL_SIZE','THICKNESS','NET_RAW_MATERIAL_CONSUMED','REMARKS','CREATED_BY','CREATED_AT'],
+  'Printing':['PRODUCTION_DATE','SHIFT','SHIFT_INCHARGE','SAP_STATUS','MACHINE_NO','SAP_SFG_NO','JOB_NAME','JOB_SETTING','TOTAL_JOB_TIME_MIN','PRODUCTION_KG','PRODUCTION_METER','PRODUCTION_MIN','AVERAGE_SPEED_MM','RHI','EE_PCT','OEE_PCT','PROCESS_WASTE','PLAIN_WASTE','APPROVAL_WASTE','SHADE_CARD_WASTE','TECHNICAL_WASTE','TOTAL_WASTE_KG','TOTAL_WASTE_PCT','PROCESS_DOWNTIME_MIN','APPROVAL_DOWNTIME_MIN','MECHANICAL_DOWNTIME_MIN','ELECTRICAL_DOWNTIME_MIN','UTILITIES_DOWNTIME_MIN','PREVENTIVE_MAINTENANCE_MIN','TOTAL_TECHNICAL_DOWNTIME_MIN','PLANNING_DOWNTIME_MIN','UNPLANNED_DOWNTIME_MIN','SAP_MATERIAL_CODE','SUBSTRATE','MATERIAL_SIZE','THICKNESS','NET_RAW_MATERIAL_CONSUMED','REMARKS','CREATED_BY','CREATED_AT'],
   'Lamination':['PRODUCTION_DATE','SHIFT','SHIFT_INCHARGE','SAP_STATUS','MACHINE_NO','SAP_SFG_NO','JOB_NAME','LAMINATION','TOTAL_JOB_TIME_MIN','PRODUCTION_KG','PRODUCTION_METER','PRODUCTION_RUNNING_MIN','AVERAGE_SPEED_MM','RHI','EE_PCT','OEE_PCT','PROCESS_WASTE','PLAIN_WASTE','TECHNICAL_WASTE','TOTAL_WASTE','TOTAL_WASTE_PCT','PROCESS_DOWNTIME_MIN','APPROVAL_DOWNTIME_MIN','MECHANICAL_DOWNTIME_MIN','ELECTRICAL_DOWNTIME_MIN','UTILITIES_DOWNTIME_MIN','PREVENTIVE_MAINTENANCE_MIN','TOTAL_TECHNICAL_DOWNTIME_MIN','PLANNING_DOWNTIME_MIN','UNPLANNED_DOWNTIME_MIN','SAP_MATERIAL_CODE','SUBSTRATE','MATERIAL_SIZE','THICKNESS','NET_RAW_MATERIAL_CONSUMED_KG','ADHESIVE_CONSUMED_KG','REMARKS'],
-  'Slitting':['PRODUCTION_DATE','SHIFT','SHIFT_INCHARGE','SAP_STATUS','MACHINE_NO','SAP_SFG_NO','JOB_NAME','NO_OF_JOB_SETTING','TOTAL_JOB_TIME_MIN','PRODUCTION_KG','PRODUCTION_METER','PRODUCTION_RUNNING_MIN','AVERAGE_SPEED','RHI','EE_PCT','OEE_PCT','TRIM_WASTE','EXTRA_TRIM_WASTE','PROCESS_WASTE','PRINT_WASTE','LAMINATION_WASTE','TECHNICAL_WASTE','TOTAL_WASTE','TOTAL_WASTE_PCT','PROCESS_DOWNTIME_MIN','MECHANICAL_DOWNTIME_MIN','ELECTRICAL_DOWNTIME_MIN','UTILITIES_DOWNTIME_MIN','PREVENTIVE_MAINTENANCE_MIN','TOTAL_TECHNICAL_DOWNTIME_MIN','PLANNING_DOWNTIME_MIN','UNPLANNED_DOWNTIME_MIN','MOTHER_REEL_INPUT','REMARKS','CREATED_BY','CREATED_AT'],
-  'Bag Making':['PRODUCTION_DATE','SHIFT','SHIFT_INCHARGE','SAP_STATUS','MACHINE_NO','SAP_SFG_NO','JOB_NAME','NO_OF_JOB_SETTING','TOTAL_JOB_TIME_MIN','PRODUCTION_PCS','PRODUCTION_KG','PRODUCTION_METER','PRODUCTION_RUNNING_MIN','AVERAGE_SPEED','RHI','EE_PCT','OEE_PCT','JOB_SETTING_KG','PROCESS_WASTAGE_KG','SORTING_WASTE_KG','PUNCH_WASTE_KG','TRIM_WASTE_KG','SLITTING_WASTE_KG','PRINTING_WASTE_KG','LAMINATE_WASTE_KG','TOTAL_WASTE_KG','TOTAL_WASTE_PCT','WASTAGE_IN_PCS','TOTAL_PCS_WASTE_PCT','TECHNICAL_WASTE_KG','PROCESS_DOWNTIME_MIN','MECHANICAL_DOWNTIME_MIN','ELECTRICAL_DOWNTIME_MIN','UTILITIES_DOWNTIME_MIN','PREVENTIVE_MAINTENANCE_MIN','TOTAL_TECHNICAL_DOWNTIME_MIN','PLANNING_DOWNTIME_MIN','UNPLANNED_DOWNTIME_MIN','INPUT_MATERIAL_KG','ZIPPER_WEIGHT','SIDE_GUSSET_WEIGHT','REMARKS','CREATED_BY','CREATED_AT']
+  'Slitting':['PRODUCTION_DATE','SHIFT','SHIFT_INCHARGE','SAP_STATUS','MACHINE_NO','SAP_SFG_NO','JOB_NAME','NO_OF_JOB_SETTING','TOTAL_JOB_TIME_MIN','PRODUCTION_KG','PRODUCTION_METER','PRODUCTION_RUNNING_MIN','AVERAGE_SPEED_MM','RHI','EE_PCT','OEE_PCT','TRIM_WASTE','EXTRA_TRIM_WASTE','PROCESS_WASTE','PRINT_WASTE','LAMINATION_WASTE','TECHNICAL_WASTE','TOTAL_WASTE','TOTAL_WASTE_PCT','PROCESS_DOWNTIME_MIN','MECHANICAL_DOWNTIME_MIN','ELECTRICAL_DOWNTIME_MIN','UTILITIES_DOWNTIME_MIN','PREVENTIVE_MAINTENANCE_MIN','TOTAL_TECHNICAL_DOWNTIME_MIN','PLANNING_DOWNTIME_MIN','UNPLANNED_DOWNTIME_MIN','MOTHER_REEL_INPUT','REMARKS','CREATED_BY','CREATED_AT'],
+  'Bag Making':['PRODUCTION_DATE','SHIFT','SHIFT_INCHARGE','SAP_STATUS','MACHINE_NO','SAP_SFG_NO','JOB_NAME','NO_OF_JOB_SETTING','TOTAL_JOB_TIME_MIN','PRODUCTION_PCS','PRODUCTION_KG','PRODUCTION_METER','PRODUCTION_RUNNING_MIN','AVERAGE_SPEED_MM','RHI','EE_PCT','OEE_PCT','JOB_SETTING_KG','PROCESS_WASTAGE_KG','SORTING_WASTE_KG','PUNCH_WASTE_KG','TRIM_WASTE_KG','SLITTING_WASTE_KG','PRINTING_WASTE_KG','LAMINATE_WASTE_KG','TOTAL_WASTE_KG','TOTAL_WASTE_PCT','WASTAGE_IN_PCS','TOTAL_PCS_WASTE_PCT','TECHNICAL_WASTE_KG','PROCESS_DOWNTIME_MIN','MECHANICAL_DOWNTIME_MIN','ELECTRICAL_DOWNTIME_MIN','UTILITIES_DOWNTIME_MIN','PREVENTIVE_MAINTENANCE_MIN','TOTAL_TECHNICAL_DOWNTIME_MIN','PLANNING_DOWNTIME_MIN','UNPLANNED_DOWNTIME_MIN','INPUT_MATERIAL_KG','ZIPPER_WEIGHT','SIDE_GUSSET_WEIGHT','REMARKS','CREATED_BY','CREATED_AT']
 };
 function parseMonthKey(m){ const [mon,yy]=(m||APP.currentMonth||'Jun-26').split('-'); return {mon, year:2000+(+yy||26)}; }
 function monthIndex(mon){ return MP_MONTHS.indexOf(mon); }
@@ -8537,25 +8669,8 @@ function renderDeptKPICharts(dept){
 }
 function deptKPIValue(x,d){ const prod=sum(d,'production'), w=sum(d,'waste'); if(x.includes('meters')) return d.reduce((a,r)=>a+deptMeters(r),0).toLocaleString(); if(x.includes('setting')) return d.reduce((a,r)=>a+deptJobSetting(r),0); if(x.includes('approval')) return (d.reduce((a,r)=>a+numValue(r,['APPROVAL_WASTE','APPROVAL_WASTAGE_KG','approvalWaste'],0),0)/Math.max(prod,1)*100).toFixed(2)+'%'; if(x.includes('wastage')) return (w/Math.max(prod,1)*100).toFixed(2)+'%'; if(x.includes('downtime')) return sum(d,'downtime')+'m'; if(x.includes('OEE')) return avg(d,'oee').toFixed(1)+'%'; if(x.includes('EE')) return avg(d,'ee').toFixed(1)+'%'; return prod.toFixed(1); }
 function renderDeptDowntime(dept){ const d=getMonthData(dept); document.getElementById('dept-tab-content').innerHTML=`<div class="table-card"><div class="table-header"><div class="table-title">Downtime Breakdown - ${dept}</div></div><table><thead><tr><th>Machine</th><th>Process</th><th>Mechanical</th><th>Electrical</th><th>Utilities</th><th>PM</th><th>Total Technical</th><th>Planning</th><th>Unplanned</th></tr></thead><tbody>${[...new Set(d.map(r=>r.machine))].map(m=>{const md=d.filter(r=>r.machine===m);const t=sum(md,'downtime');return `<tr><td>${m}</td><td>${Math.round(t*.2)}</td><td>${Math.round(t*.25)}</td><td>${Math.round(t*.15)}</td><td>${Math.round(t*.1)}</td><td>${Math.round(t*.1)}</td><td style="color:var(--orange);font-weight:600">${t}</td><td>${Math.round(t*.12)}</td><td>${Math.round(t*.08)}</td></tr>`}).join('')}</tbody></table></div>`; }
-const _origRenderQuality = renderQuality;
-renderQuality = function(container){
-  _origRenderQuality(container);
-  const stats=container.querySelector('.stats-row');
-  if(stats){
-    const d=APP.ncrData.filter(x=>FILTER_STATE.type==='month'?x.month===APP.currentMonth:true);
-    const cnt=dep=>d.filter(x=>x.dept===dep).length;
-    const complaintCount=Math.max(0,Math.round(d.length*.35));
-    const holdKg=Math.round(sum(d,'qty')*.45);
-    stats.innerHTML=`
-      <div class="stat-box"><div class="label">Total NCR</div><div class="value" style="color:${d.length>10?'var(--red)':'var(--green)'}">${d.length}</div><div class="sub">All departments</div></div>
-      <div class="stat-box"><div class="label">Total Printing NCR</div><div class="value">${cnt('Printing')}</div><div class="sub">Printing department</div></div>
-      <div class="stat-box"><div class="label">Lamination NCR</div><div class="value">${cnt('Lamination')}</div><div class="sub">Lamination department</div></div>
-      <div class="stat-box"><div class="label">Slitting NCR</div><div class="value">${cnt('Slitting')}</div><div class="sub">Slitting department</div></div>
-      <div class="stat-box"><div class="label">Bag Making NCR</div><div class="value">${cnt('Bag Making')}</div><div class="sub">Bag making department</div></div>
-      <div class="stat-box"><div class="label">Customer Complaint</div><div class="value" style="color:var(--orange)">${complaintCount}</div><div class="sub">Complaint count</div></div>
-      <div class="stat-box"><div class="label">Hold Material</div><div class="value" style="color:var(--yellow)">${holdKg}</div><div class="sub">KG on hold</div></div>`;
-  }
-};
+// NOTE: renderQuality already renders accurate real-data stat boxes directly
+// (Total NCR, Total NCR KG, Total NCR PCS, Hold Material KG) — no wrapper override needed.
 async function loadFromSheets(){
   const url=APP.settings.appScriptUrl; if(!url) return toast('Set Apps Script URL first in Settings → App Script','error');
   toast('Loading Google Sheet masters...','info');
@@ -11529,7 +11644,7 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
       PLANNING_ORDER_MASTER: { id:'10e6QTcE50kXcA__RHgCzGzzt5Gpyvb5I9c2Iojm2Yvg', tabs:{ PLANNING_ORDER_MASTER:5 } },
       WIP_MATERIAL_MASTER: { id:'142hTGmzg9CyeL-aQTzaF6JIy7WCRNvXHe6p4LPk_a6k', tabs:{ WIP_ORDER_LINK:5, CURRENT_WIP_DASHBOARD:5, WIP_MOVEMENT_LOG:5, STAGE_BALANCE:5 } }
     },
-    tabDept: { PRINTING_MASTER:'Printing', LAMINATION_MASTER:'Lamination', SLITTING_MASTER:'Slitting', BAG_MAKING_MASTER:'Bag Making' },
+    tabDept: { PRINTING_IMPORT:'Printing', LAMINATION_IMPORT:'Lamination', SLITTING_IMPORT:'Slitting', BAG_MAKING_IMPORT:'Bag Making' },
     syncing:false,
     timer:null
   };
@@ -15001,12 +15116,22 @@ console.log('[UP ERP V25] Detail report fix applied - renderDeptRows direct repl
       return emptyState('Could not load dispatch data: ' + state.error, true);
     }
 
+    // Bag Dispatch — rows where JOB_TYPE contains "BAG", Column L (ROLLS/BAGS) summed
+    var bagDispatchTotal = rows.reduce(function(a,r){
+      var jt = String(r['JOB_TYPE']||r['JOBTYPE']||r['JOB TYPE']||'').trim().toUpperCase();
+      if(jt.indexOf('BAG')===-1) return a;
+      var v = r.ROLLSBAGS!==undefined?r.ROLLSBAGS:(r['ROLLS/BAGS']!==undefined?r['ROLLS/BAGS']:r['ROLLS_BAGS']);
+      var num = parseFloat(String(v||'').replace(/,/g,''));
+      return a + (isNaN(num)?0:num);
+    }, 0);
+
     var cards =
-      '<div class="kpi-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">' +
+      '<div class="kpi-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px">' +
         kpi('cyan',   'UP Dispatch (Tons)',     ft(t.UP)) +
         kpi('green',  'UF Dispatch (Tons)',     ft(t.UF)) +
         kpi('purple', 'Export Dispatch (Tons)', ft(t.Export)) +
         kpi('orange', 'Total Dispatch (Tons)',  ft(t.total)) +
+        kpi('pink',   'Bag Dispatch',           Math.round(bagDispatchTotal).toLocaleString()) +
       '</div>';
 
     var chart =
@@ -16295,9 +16420,17 @@ function renderMaintOverview(){
   const byS=s=>reqs.filter(r=>g(r,'status')===s).length;
   // byT: count by type code, also match legacy full names
 const byT=t=>{
-  const aliases={'ME':['ME','MECHANICAL'],'EE':['EE','ELECTRICAL'],'UT':['UT','UTILITIES'],'PM':['PM']};
-  const vals=aliases[t]||[t];
-  return reqs.filter(r=>vals.includes(g(r,'type'))).length;
+  // Type values in the sheet may be stored as short codes (ME/EE/UT/PM) or full
+  // words (Mechanical/Electrical/Utilities/PM) depending on when the request was
+  // submitted — normalize both the lookup key and stored value the same way.
+  const groups={
+    'ME':['ME','MECHANICAL'], 'MECHANICAL':['ME','MECHANICAL'],
+    'EE':['EE','ELECTRICAL'], 'ELECTRICAL':['EE','ELECTRICAL'],
+    'UT':['UT','UTILITIES','UTILITY'], 'UTILITIES':['UT','UTILITIES','UTILITY'],
+    'PM':['PM']
+  };
+  const vals=groups[String(t).toUpperCase()]||[String(t).toUpperCase()];
+  return reqs.filter(r=>vals.includes(String(g(r,'type')||'').toUpperCase())).length;
 };
   const byD=d=>reqs.filter(r=>deptEq(g(r,'dept'),d)).length;
   const byP=p=>reqs.filter(r=>g(r,'priority')===p).length;
@@ -16921,14 +17054,19 @@ function renderMaintRequests(){
   const _prevTy = document.getElementById('mf-type')?.value||'';
   const _prevPr = document.getElementById('mf-priority')?.value||'';
   const _prevDp = document.getElementById('mf-dept')?.value||'';
+  const _prevSearch = document.getElementById('mf-search')?.value||'';
   c.innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+      <input type="text" id="mf-search" placeholder="🔍 Search notif no, description, machine, requester…" value="${_prevSearch.replace(/"/g,'&quot;')}"
+        oninput="filterMaintList()"
+        style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 12px;color:var(--text);font-size:12px;outline:none;width:260px">
       ${_sel('mf-status','All Status',ALL_STATUSES,'filterMaintList()',_prevSt)}
       ${_sel('mf-type','All Types (ME/EE/UT/PM)',ALL_TYPES,'filterMaintList()',_prevTy)}
       ${_sel('mf-priority','All Priorities',['CRITICAL','HIGH','MEDIUM','LOW'],'filterMaintList()',_prevPr)}
       ${_sel('mf-dept','All Departments',['Printing','Lamination','Slitting','Bag Making'],'filterMaintList()',_prevDp)}
       <button class="btn btn-outline btn-sm" onclick="syncFromSheets().then(()=>{updateBadge();filterMaintList();toast('Synced from Sheets','success')})">🔄 Sync</button>
       ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="window.exportMaintCSV()">⬇ CSV</button>`:''}
+      ${isAdmin()?`<button id="maint-delete-all-btn" class="btn btn-danger btn-sm" onclick="window.deleteAllMaintRequests()" title="Permanently delete ALL maintenance requests — use once before going live to clear test data">🗑️ Clear All Test Data</button>`:''}
     </div>
     <div class="table-card"><div style="overflow-x:auto"><table>
       <thead><tr>
@@ -16953,9 +17091,12 @@ window.filterMaintList=function(){
   const ty=document.getElementById('mf-type')?.value||'';
   const pr=document.getElementById('mf-priority')?.value||'';
   const dp=document.getElementById('mf-dept')?.value||'';
+  const q=(document.getElementById('mf-search')?.value||'').trim().toLowerCase();
   // Apply dept scope restriction first (role-based), then UI filters
   const rows=(APP.maintenanceRequests||[]).filter(r=>canSeeMaintReq(r)).slice().reverse().filter(r=>
-    (!st||g(r,'status')===st)&&(!ty||g(r,'type')===ty)&&(!pr||g(r,'priority')===pr)&&(!dp||deptEq(g(r,'dept'),dp)));
+    (!st||g(r,'status')===st)&&(!ty||g(r,'type')===ty)&&(!pr||g(r,'priority')===pr)&&(!dp||deptEq(g(r,'dept'),dp))&&
+    (!q||[g(r,'notifNo'),g(r,'id'),g(r,'description'),g(r,'machine'),g(r,'requestedBy'),g(r,'submittedByUser')]
+      .some(v=>String(v||'').toLowerCase().includes(q))));
   const tb=document.getElementById('maint-tbody');
   if(tb) tb.innerHTML=_buildRows(rows);
 };
@@ -17756,6 +17897,30 @@ window.deleteMaint=async function(id){
     APP.maintenanceRequests=(APP.maintenanceRequests||[]).filter(r=>g(r,'id')!==id);
     cacheReqs(); updateBadge(); toast(id+' deleted','success'); renderMaintRequests();
   }catch(e){ toast('Delete failed: '+e.message,'error'); }
+};
+
+// One-time cleanup: clear ALL maintenance requests (e.g. test data before going
+// live). MAIN_ADMIN only. Requires typing an exact confirmation phrase — this
+// is destructive and cannot be undone, so a simple OK/Cancel isn't enough.
+window.deleteAllMaintRequests=async function(){
+  if(!isAdmin()){ toast('Only Main Admin can do this','error'); return; }
+  const count = (APP.maintenanceRequests||[]).length;
+  if(!count){ toast('No requests to delete','info'); return; }
+  const typed = prompt('This will permanently delete ALL '+count+' maintenance request(s) — including any real/live data.\n\nType DELETE ALL to confirm:');
+  if(typed !== 'DELETE ALL'){ toast('Cancelled — text did not match','warning'); return; }
+  const btn = document.getElementById('maint-delete-all-btn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Deleting...'; }
+  try{
+    const res = await apiPost('maintenanceDeleteAll',{tab:TAB_REQ});
+    APP.maintenanceRequests = [];
+    cacheReqs(); updateBadge();
+    toast('✅ Deleted all '+count+' request(s) — cleared for live use','success');
+    renderMaintRequests();
+  }catch(e){
+    toast('Bulk delete failed: '+e.message,'error');
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='🗑️ Clear All Test Data'; }
+  }
 };
 
 // -------------------------------------------------------------------------
@@ -19009,13 +19174,20 @@ async function fetchFGFromSheet(){
     const isAlreadyNormalized = firstRow && (firstRow.totalKg !== undefined || firstRow.materialCode !== undefined);
     let normalized;
     if(isAlreadyNormalized){
-      // Recalculate pcsMtrValue based on baseUnit (PC/M → show, KG → null)
+      // Recalculate pcsMtrValue based on baseUnit (PC/M → show, KG → null),
+      // preferring the sheet's own PCS_METERS column (preserved on r._raw)
+      // over the computed unrestStock+qualStock fallback.
       normalized = APP.fgData
         .filter(r=>r.materialCode||r.totalKg>0||r.materialDesc)
         .map(r=>{
           const bu = String(r.baseUnit||'').toUpperCase().trim();
           const isPcOrM = bu==='PC'||bu==='PCS'||bu==='M'||bu==='MTR'||bu==='METER';
-          return Object.assign({}, r, { pcsMtrValue: isPcOrM ? ((r.unrestStock||0)+(r.qualStock||0)) : null });
+          if(!isPcOrM) return Object.assign({}, r, { pcsMtrValue: null });
+          const rawVal = r._raw && r._raw.PCS_METERS;
+          const pcsMtrValue = (rawVal!==undefined && rawVal!==null && rawVal!=='')
+            ? (parseFloat(String(rawVal).replace(/,/g,''))||0)
+            : ((r.unrestStock||0)+(r.qualStock||0));
+          return Object.assign({}, r, { pcsMtrValue });
         });
     } else {
       normalized = APP.fgData.map(normFG).filter(r=>r.materialCode||r.totalKg>0||r.materialDesc);
@@ -19074,11 +19246,17 @@ function normFG(r){
   const customerRaw  = v('CUSTOMER') ?? v('L') ?? '';
   const customer     = String(customerRaw === null || customerRaw === undefined ? '' : customerRaw).trim() || 'No Customer Mentioned';
 
-  // PCS/M value: show F+G sum ONLY if BASE_UNIT is PC or M
-  // If BASE_UNIT contains KG → blank (null)
+  // PCS/M value: prefer the sheet's own PCS_METERS column if present (may be
+  // factor-adjusted or manually verified) — fall back to computing F+G sum
+  // ONLY if that column is absent, and ONLY when BASE_UNIT is PC or M.
+  // If BASE_UNIT contains KG → blank (null) either way.
   const buUpper = baseUnit.toUpperCase().trim();
   const isPcOrM = buUpper === 'PC' || buUpper === 'PCS' || buUpper === 'M' || buUpper === 'MTR' || buUpper === 'METER';
-  const pcsMtrValue = isPcOrM ? (unrestStock + qualStock) : null;
+  const rawPcsMeters = v('PCS_METERS');
+  const pcsMtrValue = !isPcOrM ? null
+    : (rawPcsMeters !== undefined && rawPcsMeters !== null && rawPcsMeters !== '')
+      ? N('PCS_METERS')
+      : (unrestStock + qualStock);
 
   return {
     customer,
@@ -19238,13 +19416,34 @@ function renderFGBody(body, rows){
   const byCustomer = {};
   customers.forEach(c=>{ byCustomer[c] = rows.filter(r=>r.customer===c); });
 
+  // Bag Dispatch — from Dispatch Master (current month), rows where JOB_TYPE
+  // contains "BAG", Column L (ROLLS/BAGS) summed. Shown here too since FG/Dispatch
+  // are closely related tabs and this metric is relevant to both.
+  const _fgBagDispatch = (function(){
+    const monthNow = APP.currentMonth;
+    const dRows = (APP.dispatchData||[]).filter(r=>{
+      const raw = r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE||r.DATE||'';
+      try{ const d=new Date(raw); if(isNaN(d)) return false;
+        return d.toLocaleString('en',{month:'short'})+'-'+String(d.getFullYear()).slice(2) === monthNow;
+      }catch(e){ return false; }
+    });
+    return dRows.reduce((a,r)=>{
+      const jt = String(r['JOB_TYPE']||r['JOBTYPE']||r['JOB TYPE']||'').trim().toUpperCase();
+      if(!jt.includes('BAG')) return a;
+      const v = r.ROLLSBAGS!==undefined?r.ROLLSBAGS:(r['ROLLS/BAGS']!==undefined?r['ROLLS/BAGS']:r['ROLLS_BAGS']);
+      const num=parseFloat(String(v||'').replace(/,/g,''));
+      return a+(isNaN(num)?0:num);
+    },0);
+  })();
+
   body.innerHTML=`
     <!-- -- KPI CARDS ------------------------------------ -->
-    <div class="kpi-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
+    <div class="kpi-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px">
       ${fgKPI('cyan','📦','Total FG Stock', totalKg.toLocaleString('en-PK',{maximumFractionDigits:2})+' KG', 'All customers combined')}
       ${fgKPI('green','🏢','Customers', customers.length, 'With FG stock')}
       ${fgKPI('purple','🔖','Total Materials', materials, 'Distinct material codes')}
       ${fgKPI('orange','📍','Storage Locations', locations.length, locations.slice(0,3).join(', ')+(locations.length>3?'…':''))}
+      ${fgKPI('pink','🛍','Bag Dispatch', Math.round(_fgBagDispatch).toLocaleString(), 'This month · Job Type = BAG')}
     </div>
 
     <!-- -- SEARCH + FILTER ----------------------------- -->
@@ -19353,7 +19552,7 @@ function buildJobTable(customer, cRows){
       materialGroup: r.materialGroup, totalKg: 0, pcsMtr: 0, showPcsMtr: false, rows: []
     };
     matMap[key].totalKg += r.totalKg;
-    if(r.colN > 0){ matMap[key].pcsMtr += r.colN; matMap[key].showPcsMtr = true; }
+    if(r.pcsMtrValue > 0){ matMap[key].pcsMtr += r.pcsMtrValue; matMap[key].showPcsMtr = true; }
     matMap[key].rows.push(r);
   });
 
@@ -20878,12 +21077,12 @@ console.log('[SDC] Smart Delta Cache v1.0 loaded | Today:', todayMonthKey());
 'use strict';
 
 var DEPT_TAB = {
-  'Printing'  : 'PRINTING_MASTER',
-  'Lamination': 'LAMINATION_MASTER',
-  'Slitting'  : 'SLITTING_MASTER',
-  'Bag Making': 'BAG_MAKING_MASTER'
+  'Printing'  : 'PRINTING_IMPORT',
+  'Lamination': 'LAMINATION_IMPORT',
+  'Slitting'  : 'SLITTING_IMPORT',
+  'Bag Making': 'BAG_MAKING_IMPORT'
 };
-var ALL_PROD_TABS = ['PRINTING_MASTER','LAMINATION_MASTER','SLITTING_MASTER','BAG_MAKING_MASTER'];
+var ALL_PROD_TABS = ['PRINTING_IMPORT','LAMINATION_IMPORT','SLITTING_IMPORT','BAG_MAKING_IMPORT'];
 
 // -- Get Apps Script URL ---------------------------------------------------
 function getScriptUrl(){
@@ -20942,9 +21141,9 @@ function normalizeRow(raw, tabName){
     __SOURCE_TAB: tabName,
     date: iso,
     month: month,
-    production: parseFloat(raw.PRODUCTION_KG || raw.PRODUCTION_PCS || 0),
-    dept: ({PRINTING_MASTER:'Printing',LAMINATION_MASTER:'Lamination',
-            SLITTING_MASTER:'Slitting',BAG_MAKING_MASTER:'Bag Making'})[tabName]||'Production'
+    production: parseFloat(raw.PRODUCTION_PCS || raw.PRODUCTION_KG || 0),
+    dept: ({PRINTING_IMPORT:'Printing',LAMINATION_IMPORT:'Lamination',
+            SLITTING_IMPORT:'Slitting',BAG_MAKING_IMPORT:'Bag Making'})[tabName]||'Production'
   });
 }
 
