@@ -15546,8 +15546,8 @@ function canStage3(r){
   if(!canSubmit()) return false; // tech roles cannot fill Stage 3
   const reqDept = String(g(r,'dept')||'').trim();
   const myScope = userDeptScope();
-  // Dept match → allowed
-  if(myScope && myScope === reqDept) return true;
+  // Dept match → allowed (case-insensitive — sheet casing isn't guaranteed consistent)
+  if(myScope && deptEq(myScope,reqDept)) return true;
   // Submitted by me (even if dept somehow differs)
   if(g(r,'submittedByUser')===curUser()) return true;
   return false;
@@ -15720,22 +15720,24 @@ async function apiGet(action,extra){
   const sheetId=getMaintSheetId();
   if(!sheetId) throw new Error('Maintenance Sheet ID not configured in Settings');
   const _tab = (extra && extra.tab) || TAB_REQ;
-  // erpApi() defaults headerRow to 3 generically (correct for ACM/SYSTEM_MASTER reads,
-  // WRONG for maintenance tabs) — always pass the correct header row explicitly so
-  // that generic default never silently wins.
-  const _hdrByTab = { [TAB_REQ]: 2, [TAB_PROG]: 1 };
+  // IMPORTANT: the F field-map (F.type, F.dept, F.machine, F.id, etc.) is built from
+  // ROW 3 (the example/placeholder row) normalized text — NOT row 2's real column
+  // names. This is confirmed by exact string match (e.g. F.dept ===
+  // normalize('Printing / Lamination / Slitting / Bag Making') which is row 3's
+  // DEPARTMENT example cell). So header row MUST be 3 for MAINTENANCE_REQUESTS —
+  // using row 2 breaks every g(r,'type')/g(r,'dept') lookup sitewide.
+  const _hdrByTab = { [TAB_REQ]: 3, [TAB_PROG]: 1 };
   const _headerRow = (extra && extra.headerRow) || _hdrByTab[_tab] || 1;
   return erpApi(Object.assign({action,sheetId,tab:TAB_REQ,headerRow:_headerRow},extra||{}));
 }
 async function apiPost(action,body){
   const sheetId=getMaintSheetId();
   if(!sheetId) throw new Error('Maintenance Sheet ID not configured in Settings');
-  // Same fix as apiGet: erpApi() defaults headerRow to 3 generically, which is
-  // WRONG for maintenance tabs (real header is row 2 for MAINTENANCE_REQUESTS,
-  // row 1 for MAINTENANCE_PROGRESS). Always pass the correct value explicitly.
+  // Same correction as apiGet: F field-map keys are built from row 3 (example row)
+  // text, so header row must be 3 for MAINTENANCE_REQUESTS (row 1 for PROGRESS).
   const _tab = (body && body.tab) || TAB_REQ;
-  const _hdrByTab = { [TAB_REQ]: 2, [TAB_PROG]: 1 };
-  const _headerRow = (body && body.headerRow) || _hdrByTab[_tab] || 2;
+  const _hdrByTab = { [TAB_REQ]: 3, [TAB_PROG]: 1 };
+  const _headerRow = (body && body.headerRow) || _hdrByTab[_tab] || 3;
   // Apps Script doPost reads action from payload.action (body), not URL params.
   // We put action+sheetId BOTH in URL params AND in the body so either pattern works.
   const merged=Object.assign({action,sheetId,headerRow:_headerRow},body||{});
@@ -16499,7 +16501,7 @@ function renderMaintQueue(_resetFilter){
     hint='You see everything. Locked/Closed records are excluded.';
   } else if(_myDeptScope && !isTech() && !inchargeTeam()){
     // Production dept incharge (Printing/Lamination etc.) - their dept only, active
-    mine=all.filter(r=>String(g(r,'dept')||'').trim()===_myDeptScope&&!['LOCKED','CLOSED'].includes(g(r,'status')));
+    mine=all.filter(r=>deptEq(g(r,'dept'),_myDeptScope)&&!['LOCKED','CLOSED'].includes(g(r,'status')));
     heading=_myDeptScope+' - My Queue';
     hint='Maintenance requests for '+_myDeptScope+' department.';
   } else if(canAcceptMaint()){
