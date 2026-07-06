@@ -6007,11 +6007,90 @@ window.generateProductionReport = function(monthOverride){
   <div class="foot">Generated ${genTime} &middot; Universal Packaging ERP<br>
   <i>Note: This is a system-generated report. Minor discrepancies may occur.</i></div>
 
-  <div class="no-print" style="margin-top:16px;text-align:center">
+  <div class="no-print" style="margin-top:16px;text-align:center;display:flex;gap:10px;justify-content:center">
     <button onclick="window.print()" style="background:#1e3a5f;color:#fff;border:none;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">🖨 Print / Save PDF</button>
+    <button onclick="window.opener && window.opener.downloadProductionReportExcel && window.opener.downloadProductionReportExcel('${month}')" style="background:#16a34a;color:#fff;border:none;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">📊 Download Excel</button>
   </div>
   </body></html>`);
   win.document.close();
+};
+
+// Excel (CSV) export for the Production Report — same data as the PDF popup above,
+// opens directly in Excel/Google Sheets. Called from the popup's "Download Excel" button.
+window.downloadProductionReportExcel = function(monthOverride){
+  const month = monthOverride || APP.currentMonth || (function(){
+    const d=new Date(); return d.toLocaleString('en',{month:'short'})+'-'+String(d.getFullYear()).slice(2);
+  })();
+
+  function n(v){ if(v===undefined||v===null||v==='') return 0; const x=parseFloat(String(v).replace(/,/g,'')); return isNaN(x)?0:x; }
+  function ymKey(dateStr){ const d=new Date(dateStr); return isNaN(d)?'':d.toLocaleString('en',{month:'short'})+'-'+String(d.getFullYear()).slice(2); }
+  function dayOfMonth(dateStr){ const d=new Date(dateStr); return isNaN(d)?null:d.getDate(); }
+  function daysInMonth(mKey){
+    const parts=mKey.split('-'); const monthsAbbr=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const mi=monthsAbbr.findIndex(x=>x.toLowerCase()===parts[0].toLowerCase()); const yr=2000+parseInt(parts[1],10);
+    return new Date(yr, mi+1, 0).getDate();
+  }
+
+  const prod = (APP.productionData||[]).filter(r=>ymKey(r.PRODUCTION_DATE||r.date||'')===month);
+  const disp = (APP.dispatchData||[]).filter(r=>ymKey(r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE||'')===month);
+  const nDays = daysInMonth(month);
+  const days = Array.from({length:nDays},(_,i)=>i+1);
+
+  function deptRowsForDay(dept,day){ return prod.filter(r=>r.dept===dept && dayOfMonth(r.PRODUCTION_DATE||r.date)===day); }
+  function resolveDispatchCategory(r){
+    const plant=String(r['PLANT/TYPE']||r['PLANT_TYPE']||r['PLANTTYPE']||r['PLANT']||r['TYPE']||'').trim().toUpperCase();
+    if(/EXPORT/.test(plant)) return 'Export'; if(/UF/.test(plant)) return 'UF'; return 'UP';
+  }
+  function resolveDispatchKg(r){
+    const keys=['DISPATCHED (KG)','DISPATCHED_KG','DISPATCHED KG','DISPATCH KG','DISPATCHEDKG','DISPATCHED','QTY KG','QUANTITY KG','KG','QTY','QUANTITY'];
+    for(const k of keys){ if(r[k]!==undefined && r[k]!=='') return n(r[k]); } return 0;
+  }
+  function dispatchRowsForDay(day){ return disp.filter(r=>dayOfMonth(r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE)===day); }
+
+  const rows = days.map(day=>{
+    const pr=deptRowsForDay('Printing',day), la=deptRowsForDay('Lamination',day), sl=deptRowsForDay('Slitting',day), bg=deptRowsForDay('Bag Making',day);
+    const dr=dispatchRowsForDay(day);
+    const prMeter=pr.reduce((a,r)=>a+n(r.PRODUCTION_METER),0), laMeter=la.reduce((a,r)=>a+n(r.PRODUCTION_METER),0), slMeter=sl.reduce((a,r)=>a+n(r.PRODUCTION_METER),0);
+    const bgTon=bg.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000, bgPcs=bg.reduce((a,r)=>a+n(r.PRODUCTION_PCS||r.productionPcs),0);
+    const upTon=dr.filter(r=>resolveDispatchCategory(r)==='UP').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
+    const ufTon=dr.filter(r=>resolveDispatchCategory(r)==='UF').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
+    const expQty=dr.filter(r=>resolveDispatchCategory(r)==='Export').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
+    const bagPouchCount=dr.reduce((a,r)=>a+n(r.BAG_POUCH_QTY||r.bagPouchQty),0);
+    return {
+      day, prMeter, prTon:(pr.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000),
+      laMeter, laTon:(la.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000),
+      slMeter, slTon:(sl.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000),
+      bgTon, bgPcs, upTon, ufTon, expQty, bagPouchCount
+    };
+  });
+  const tot = rows.reduce((a,r)=>({
+    prMeter:a.prMeter+r.prMeter,prTon:a.prTon+r.prTon,laMeter:a.laMeter+r.laMeter,laTon:a.laTon+r.laTon,
+    slMeter:a.slMeter+r.slMeter,slTon:a.slTon+r.slTon,bgTon:a.bgTon+r.bgTon,bgPcs:a.bgPcs+r.bgPcs,
+    upTon:a.upTon+r.upTon,ufTon:a.ufTon+r.ufTon,expQty:a.expQty+r.expQty,bagPouchCount:a.bagPouchCount+r.bagPouchCount
+  }),{prMeter:0,prTon:0,laMeter:0,laTon:0,slMeter:0,slTon:0,bgTon:0,bgPcs:0,upTon:0,ufTon:0,expQty:0,bagPouchCount:0});
+
+  const f2=x=>(x||0).toFixed(2);
+  const f0=x=>Math.round(x||0);
+  const csvEsc=v=>{ const s=String(v); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; };
+
+  const header1=['Date','Printing','','Lamination','','Slitting','','Bag Making','','Dispatch','','',''];
+  const header2=['','Meter','Ton','Meter','Ton','Meter','Ton','Ton','Pcs','UP Ton','UF Ton','Export Qty','Bag/Pouch'];
+  const lines=[header1,header2];
+  rows.forEach(r=>lines.push([
+    `${String(r.day).padStart(2,'0')}-${month}`, f0(r.prMeter),f2(r.prTon), f0(r.laMeter),f2(r.laTon),
+    f0(r.slMeter),f2(r.slTon), f2(r.bgTon),f0(r.bgPcs), f2(r.upTon),f2(r.ufTon),f2(r.expQty),f0(r.bagPouchCount)
+  ]));
+  lines.push(['GRAND TOTAL', f0(tot.prMeter),f2(tot.prTon), f0(tot.laMeter),f2(tot.laTon),
+    f0(tot.slMeter),f2(tot.slTon), f2(tot.bgTon),f0(tot.bgPcs), f2(tot.upTon),f2(tot.ufTon),f2(tot.expQty),f0(tot.bagPouchCount)]);
+
+  const csv = lines.map(row=>row.map(csvEsc).join(',')).join('\r\n');
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `Production_Report_${month}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  if(typeof toast==='function') toast('✅ Excel (CSV) downloaded','success');
 };
 
 // =============================================
