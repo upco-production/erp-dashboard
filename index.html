@@ -187,7 +187,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 .kpi-progress-bar{height:100%;border-radius:2px;transition:width .5s}
 
 /* CHARTS — fluid responsive */
-.charts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:clamp(10px,2.5vw,16px);margin-bottom:20px}
+.charts-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:clamp(10px,2.5vw,16px);margin-bottom:20px}
 .chart-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:clamp(10px,2.5vw,16px);min-width:0;overflow:hidden}
 .chart-card.full{grid-column:1/-1}
 .chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:8px;flex-wrap:wrap}
@@ -399,7 +399,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   .content{padding:12px}
 
   /* KPI grid: 2 columns on mobile */
-  .kpi-grid{gap:8px;margin-bottom:14px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  .kpi-grid{gap:8px;margin-bottom:14px;grid-template-columns:repeat(2,1fr)}
   .kpi-card{padding:10px}
   .kpi-value{font-size:22px}
   .kpi-icon{width:28px;height:28px;font-size:14px}
@@ -479,7 +479,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 
 /* Small mobile: 480px and below */
 @media(max-width:480px){
-  .kpi-grid{gap:6px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+  .kpi-grid{gap:6px;grid-template-columns:repeat(2,1fr)}
   .kpi-card{padding:8px}
   .kpi-value{font-size:20px}
   .kpi-label{font-size:10px}
@@ -523,6 +523,56 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .dash-tabpane{display:none;animation:fadeIn .2s ease}
 .dash-tabpane.active{display:block}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+/* Detail report: sticky header row */
+.table-card table thead th{
+  position:sticky;top:0;z-index:2;background:var(--bg2);
+  box-shadow:0 1px 0 var(--border);
+}
+
+/* ===== MOBILE RESPONSIVE FIXES (ERP-wide) ===== */
+
+/* WIP header: stack on mobile */
+@media(max-width:600px){
+  #wip-erp-sync-time{ font-size:10px }
+  .filter-bar{ flex-direction:column; }
+  .filter-bar input, .filter-bar select{ width:100% !important; min-width:unset !important; }
+}
+
+/* Tables: always scrollable */
+.table-card { overflow:hidden; }
+.table-card > div[style*="overflow"] { -webkit-overflow-scrolling:touch; }
+
+/* KPI grid: max 2 on mobile, 1 on very small */
+@media(max-width:480px){
+  .kpi-grid[style*="repeat(4"],[style*="repeat(5"],[style*="repeat(6"]{
+    grid-template-columns:repeat(2,1fr) !important;
+  }
+}
+@media(max-width:360px){
+  .kpi-grid[style*="repeat"]{
+    grid-template-columns:1fr !important;
+  }
+}
+
+/* Charts: always single column on mobile */
+@media(max-width:600px){
+  .charts-grid{ grid-template-columns:1fr !important; }
+}
+
+/* Sidebar WIP: scroll container */
+@media(max-width:768px){
+  #wip-job-master-wrap{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
+}
+
+/* Maintenance tables: scroll */
+.maint-table-wrap{ overflow:auto; max-height:70vh; -webkit-overflow-scrolling:touch; }
+
+/* Header: fit on mobile */
+@media(max-width:480px){
+  #last-sync-indicator{ display:none; }
+  .header-time{ display:none; }
+}
 </style>
 </head>
 <body>
@@ -551,7 +601,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
     </div>
     <div class="login-error" id="login-error">Invalid username or password</div>
     <button class="login-btn" onclick="window.doLogin()">Login</button>
-    <button class="btn btn-outline" style="width:100%;margin-top:10px" onclick="preLoginSyncDiagnostics()">Test Sheet Connection / Load Users</button>
+
     <div id="login-url-section" style="margin-top:12px">
       <div style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:6px" onclick="(function(){var s=document.getElementById('login-url-fields');s.style.display=s.style.display==='none'?'block':'none'})()">
         <span style="font-size:10px;color:var(--text3)">⚙ Apps Script URL</span>
@@ -1542,38 +1592,28 @@ function renderDashboard(container) {
           if(!d || d.length < 7) return false;
           return upDateToMonthKey(d) === m;
         });
-    return rows.reduce((a,r)=> a + (+(r.PRODUCTION_PCS || r.productionPcs || 0)), 0);
+    return rows.reduce((a,r)=> a + (+(r.PRODUCTION_PCS || r.productionPcs || (r.dept==='Bag Making'?r.production:0) || 0)), 0);
   }
-  // Your DISPATCH_MASTER has ONE quantity column - DISPATCHED (KG) - and
-  // category is derived from PLANT/TYPE (Export / UF / UP or blank).
-  // The old approach looked for UP_DISPATCH_KG etc which don't exist,
-  // causing the fallback getByColumnIndex to pick wrong columns.
-  function resolveDispatchCategory(r){
-    // Uses same logic as the upDispatch module's COLUMNS definition
-    const plant = String(
-      r['PLANT/TYPE'] || r['PLANT_TYPE'] || r['PLANTTYPE'] || r['PLANT'] || r['TYPE'] || ''
-    ).trim().toUpperCase();
-    if(/EXPORT/.test(plant)) return 'Export';
-    if(/UF/.test(plant))     return 'UF';
-    return 'UP'; // blank or UP both count as UP
-  }
-  function resolveDispatchKg(r){
-    // Try every known synonym for the dispatched quantity column
-    const qty = getAny(r,[
-      'DISPATCHED (KG)','DISPATCHED_KG','DISPATCHED KG','DISPATCH KG',
-      'DISPATCHEDKG','DISPATCHED','QTY KG','QUANTITY KG','KG','QTY','QUANTITY'
-    ], '');
-    return qty !== '' ? n(qty) : 0;
-  }
+  // Dispatch KPIs — use APP.upDispatchData (classified: _cat=UP/UF/Export, _kg=KG)
+  // as the single source of truth. Falls back to raw APP.dispatchData PLANT/TYPE
+  // classification when upDispatchData is not yet populated.
+  function _dashClassify(p){ const u=String(p||'').toUpperCase(); if(u.includes('EXPORT')) return 'Export'; if(u.includes('UF')) return 'UF'; return 'UP'; }
   function totalDispatchKg(colIndex, names, m=month){
-    // colIndex/names are kept as parameters for backward compatibility
-    // but are no longer used - category is read from PLANT/TYPE instead.
-    const categoryMap = {1:'UP', 2:'UF', 3:'Export'};
-    const targetCat   = categoryMap[colIndex] || 'UP';
+    // colIndex: 1=UP, 2=UF, 3=Export
+    const catMap={1:'UP',2:'UF',3:'Export'};
+    const cat = catMap[colIndex]||'UP';
+    // PRIMARY: APP.upDispatchData
+    const normRows = Array.isArray(APP.upDispatchData) ? APP.upDispatchData : [];
+    const normMonth = normRows.filter(r=>r._month===m);
+    if(normMonth.length){
+      return normMonth.filter(r=>r._cat===cat).reduce((a,r)=>a+(r._kg||0),0);
+    }
+    // FALLBACK: raw APP.dispatchData classified by PLANT/TYPE
     return rowsMonth(APP.dispatchData||[], m).reduce((a,r)=>{
-      if(resolveDispatchCategory(r) !== targetCat) return a;
-      return a + resolveDispatchKg(r);
-    }, 0);
+      const rawCat = _dashClassify(r.PLANT_TYPE||r['PLANT/TYPE']||r.PLANTTYPE||r.PLANT||r.TYPE||'');
+      if(rawCat!==cat) return a;
+      return a+n(r['DISPATCHED (KG)']||r.DISPATCHED_KG||r.DISPATCH_KG||r.DISPATCHED||r.UP_DISPATCH||r['UP DISPATCH']||r.UF_DISPATCH||r['UF DISPATCH']||r.EXPORT_DISPATCH||r['EXPORT DISPATCH']||0);
+    },0);
   }
   function dispatchTons(colIndex, names, m=month){
     return totalDispatchKg(colIndex, names, m) / 1000;
@@ -1616,13 +1656,25 @@ function renderDashboard(container) {
   const upDispatch = dispatchTons(1, ['UP_DISPATCH_KG','UP_DISPATCH','UP_DISPATCH_QTY','UP_KG','UP']);
   const ufDispatch = dispatchTons(2, ['UF_DISPATCH_KG','UF_DISPATCH','UF_DISPATCH_QTY','UF_KG','UF']);
   const exportDispatch = dispatchTons(3, ['EXPORT_DISPATCH_KG','EXPORT_DISPATCH','EXPORT_DISPATCH_QTY','EXPORT_KG','EXPORT']);
-  // Bag/Pouch Dispatched — Dispatch Master rows where JOB_TYPE contains "BAG", Column L (ROLLS/BAGS) summed
-  const bagPouchDispatchedKg = rowsMonth(APP.dispatchData||[], month).reduce((a,r)=>{
-    const jt = String(r['JOB_TYPE']||r['JOBTYPE']||r['JOB TYPE']||'').trim().toUpperCase();
-    if(!jt.includes('BAG')) return a;
-    const qty = getAny(r,['ROLLSBAGS','ROLLS/BAGS','ROLLS_BAGS'],'');
-    return a + (qty!==''?n(qty):0);
-  }, 0);
+  // Bag/Pouch Dispatched — Dispatch Master Column Q (BAG_QTY), direct sum.
+  // PRIMARY: read from upDispatch normalized rows (cells.bagqty) which always
+  // survive normalizeRows() regardless of raw column name variation.
+  // FALLBACK: raw APP.dispatchData with multi-synonym lookup.
+  const bagPouchDispatchedKg = (function(){
+    const normRows = Array.isArray(APP.upDispatchData) ? APP.upDispatchData : [];
+    const normMonthRows = normRows.filter(r=>r._month===month);
+    if(normMonthRows.length){
+      return normMonthRows.reduce((a,r)=>{
+        const num = parseFloat(String((r.cells&&r.cells.bagqty)||'').replace(/,/g,''));
+        return a + (isNaN(num)?0:num);
+      }, 0);
+    }
+    // Fallback: raw dispatchData
+    return rowsMonth(APP.dispatchData||[], month).reduce((a,r)=>{
+      const qty = getAny(r,['BAG_QTY','BAG QTY','BAGQTY'],'');
+      return a + (qty!==''?n(qty):0);
+    }, 0);
+  })();
 
   const inkRecords = rowsMonth(APP.inkData||[], month).filter(r=>!r.type);
   const inkConsumedKg = inkRecords.reduce((a,r)=>a+n(r.INK_CONSUMED_KG),0);
@@ -2903,13 +2955,17 @@ function renderDeptDailyTab(tc, dept){
   data.forEach(r=>{
     const key = fmtDDMMYYYY(r.date||r.PRODUCTION_DATE||'') || '-';
     const raw  = r.date||r.PRODUCTION_DATE||'';
-    if(!byDate[key]) byDate[key]={date:key,rawDate:raw,rows:[],prodKg:0,meters:0,wasteKg:0,dt:0};
+    if(!byDate[key]) byDate[key]={date:key,rawDate:raw,rows:[],prodKg:0,meters:0,wasteKg:0,dt:0,eeSum:0,oeeSum:0,eeCount:0};
     const b=byDate[key];
     b.rows.push(r);
     b.prodKg  += +(r.production||r.productionKg||r.PRODUCTION_KG||0);
     b.meters  += +(r.productionMeter||r.PRODUCTION_METER||0);
     b.wasteKg += +(r.waste||r.TOTAL_WASTE_KG||0);
     b.dt      += +(r.downtime||r.TOTAL_TECHNICAL_DOWNTIME_MIN||0);
+    // Track EE%/OEE% for day-level average (only count rows where a value exists)
+    const eeVal  = +(r.ee||r.EE_PCT||0);
+    const oeeVal = +(r.oee||r.OEE_PCT||0);
+    if(eeVal>0 || oeeVal>0){ b.eeSum+=eeVal; b.oeeSum+=oeeVal; b.eeCount++; }
   });
   const sorted = Object.values(byDate).sort((a,b)=>a.rawDate<b.rawDate?-1:1);
 
@@ -2949,11 +3005,13 @@ function renderDeptDailyTab(tc, dept){
           <th>Date</th>
           <th>Production (KG / PCS)</th><th>Meters (m)</th>
           <th>Waste KG</th><th>Waste %</th>
-          <th>DT (min)</th><th>Records</th>
+          <th>DT (min)</th><th>%EE</th><th>%OEE</th><th>Records</th>
         </tr></thead>
         <tbody id="dept-daily-tbody">
           ${sorted.length?sorted.map(dt=>{
             const wPct=dt.prodKg>0?(dt.wasteKg/dt.prodKg*100):0;
+            const eeAvg = dt.eeCount>0 ? (dt.eeSum/dt.eeCount) : 0;
+            const oeeAvg = dt.eeCount>0 ? (dt.oeeSum/dt.eeCount) : 0;
             const rid='deptday-'+dt.date.replace(/\//g,'-');
             const isToday=fmtDDMMYYYY(new Date().toISOString().slice(0,10))===dt.date;
             return `
@@ -2966,10 +3024,12 @@ function renderDeptDailyTab(tc, dept){
               <td style="color:var(--red)">${dt.wasteKg.toFixed(1)}</td>
               <td style="font-weight:600;color:${wPct<=5?'var(--green)':'var(--red)'}">${wPct.toFixed(2)}%</td>
               <td style="color:var(--orange)">${dt.dt}</td>
+              <td style="color:${eeAvg>=80?'var(--green)':'var(--yellow)'}">${eeAvg.toFixed(1)}%</td>
+              <td>${oeeAvg.toFixed(1)}%</td>
               <td><span class="badge badge-blue">${dt.rows.length}</span></td>
             </tr>
             <tr id="${rid}" style="display:none">
-              <td colspan="7" style="padding:0">
+              <td colspan="9" style="padding:0">
                 <table style="width:100%;border-collapse:collapse">
                   <thead><tr style="background:rgba(31,111,235,.08);font-size:11px">
                     <th style="padding-left:24px">Machine</th><th>Shift</th><th>Incharge</th>
@@ -3732,18 +3792,20 @@ function getWIPEnhancedRows(){
   const jobs=[];
   base.forEach((w,i)=>{
     // Feature 6: resolve all WIP stage quantities from live field names
-    const printedWIP    = resolveNum(w, ['PRINTED_WIP','PRINTED_QTY','PRINT_WIP','PRINTING_WIP','PRINTING_QTY','PRINTED_KG','PRINT_QTY','PRINTING_BALANCE','WIP_PRINTING','printedWIP'], 0);
-    const laminatedWIP  = resolveNum(w, ['LAMINATED_WIP','LAMINATED_QTY','LAM_WIP','LAMINATION_WIP','LAMINATION_QTY','LAMINATED_KG','LAM_QTY','WIP_LAMINATION','laminatedWIP'], 0);
-    const slittedWIP    = resolveNum(w, ['SLITTED_WIP','SLITTED_QTY','SLIT_WIP','SLITTING_WIP','SLITTING_QTY','SLITTED_KG','SLIT_QTY','WIP_SLITTING','slittedWIP'], 0);
-    const bagMakingWIP  = resolveNum(w, ['BAG_MAKING_WIP','BAG_WIP','BAG_MAKING_QTY','BAGMAKING_WIP','BAG_QTY','BAG_MAKING_KG','BAG_MAKING_PCS','WIP_BAG_MAKING','bagMakingWIP'], 0);
-    const orderQty      = resolveNum(w, ['ORDER_QTY','ORDER_QUANTITY','PLANNED_QTY','PO_QTY','ORDER_KG','ORDER_PCS','TOTAL_ORDER_QTY','orderQty'], 0);
-    const producedQty   = resolveNum(w, ['PRODUCED_QTY','PRODUCED_QUANTITY','COMPLETED_QTY','TOTAL_PRODUCED_QTY','PRODUCTION_QTY','PRODUCTION_KG','PRODUCTION_PCS','producedQty'], 0);
+    // WIP_ORDER_LINK column names (actual sheet): PRINTING_BALANCE_KG, LAMINATION_BALANCE_KG, SLITTING_BALANCE_KG
+    // Also support STAGE_BALANCE derived fields and legacy field names
+    const printedWIP    = resolveNum(w, ['PRINTING_BALANCE_KG','PRINTING_BALANCE','PRINTED_WIP','PRINTED_QTY','PRINT_WIP','PRINTING_WIP','PRINTING_QTY','PRINTED_KG','PRINT_QTY','WIP_PRINTING','printBalance','printedWIP'], 0);
+    const laminatedWIP  = resolveNum(w, ['LAMINATION_BALANCE_KG','LAMINATION_BALANCE','LAMINATED_WIP','LAMINATED_QTY','LAM_WIP','LAMINATION_WIP','LAMINATION_QTY','LAMINATED_KG','LAM_QTY','WIP_LAMINATION','lamBalance','laminatedWIP'], 0);
+    const slittedWIP    = resolveNum(w, ['SLITTING_BALANCE_KG','SLITTING_BALANCE','SLITTED_WIP','SLITTED_QTY','SLIT_WIP','SLITTING_WIP','SLITTING_QTY','SLITTED_KG','SLIT_QTY','WIP_SLITTING','slitBalance','slittedWIP'], 0);
+    const bagMakingWIP  = resolveNum(w, ['SLITTING_USED_BY_BAG_KG','BAG_MAKING_BALANCE_KG','BAG_MAKING_WIP','BAG_WIP','BAG_MAKING_QTY','BAGMAKING_WIP','BAG_QTY','BAG_MAKING_KG','BAG_MAKING_PCS','WIP_BAG_MAKING','bagBalance','bagMakingWIP'], 0);
+    const orderQty      = resolveNum(w, ['ORDER_QTY_KG','ORDER_QTY','ORDER_QUANTITY','PLANNED_QTY','PO_QTY','ORDER_KG','ORDER_PCS','TOTAL_ORDER_QTY','orderQty'], 0);
+    const producedQty   = resolveNum(w, ['DELIVERED_QTY_KG','PRODUCED_QTY','PRODUCED_QUANTITY','COMPLETED_QTY','TOTAL_PRODUCED_QTY','PRODUCTION_QTY','PRODUCTION_KG','PRODUCTION_PCS','producedQty'], 0);
 
     // Derive currentQty: highest stage that has material
     let qty = bagMakingWIP || slittedWIP || laminatedWIP || printedWIP || 0;
 
     // Determine current stage from data or from which WIP field is populated
-    let currentStage = w.CURRENT_STAGE || w.currentStage || w.STAGE || w.stage || '';
+    let currentStage = w.CURRENT_STAGE || w.currentStage || w.STAGE || w.stage || w.currentStage || '';
     if (!currentStage) {
       if (bagMakingWIP > 0) currentStage = 'Bag Making';
       else if (slittedWIP > 0) currentStage = 'Slitting';
@@ -3752,7 +3814,7 @@ function getWIPEnhancedRows(){
       else currentStage = stages[i % 4];
     }
 
-    const status = w.STATUS || w.status || w.JOB_STATUS || w.jobStatus || (['Running','Pending','Hold','Completed'][i%4]);
+    const status = w.ORDER_STATUS || w.STATUS || w.status || w.JOB_STATUS || w.jobStatus || 'IN PROGRESS';
     const qualityStatus = w.QUALITY_STATUS || w.qualityStatus || w.QC_STATUS || (status==='Hold'?'HOLD':(i%9===0?'REWORK':(i%13===0?'REJECT':'PASS')));
     const structure = w.PRODUCT_STRUCTURE || w.productStructure || w.STRUCTURE || structures[i%structures.length];
 
@@ -3769,8 +3831,8 @@ function getWIPEnhancedRows(){
     jobs.push({
       id: i+1,
       jobNo:    w.JOB_NAME || w.job || w.JOB_NO || w.jobNo || ('JOB-'+String(1000+i)),
-      sapPO:    w.SAP_PO   || w.sapPO   || w.PO      || ('PO-'+String(10000+i)),
-      sapSFG:   w.SAP_SFG_NO || w.SAP_SFG || w.sapSFG || ('SFG-'+String(5000+i)),
+      sapPO:    w.ORDER || w.SAP_PO   || w.sapPO   || w.PO      || ('PO-'+String(10000+i)),
+      sapSFG:   w.MATERIAL || w.SAP_SFG_NO || w.SAP_SFG || w.sapSFG || ('SFG-'+String(5000+i)),
       customer: w.CUSTOMER || w.customer || customers[i%customers.length],
       productStructure: structure,
       orderQty: resolvedOrderQty,
@@ -3871,12 +3933,12 @@ function renderWIP(container){
   const ageingBuckets=[['0-3 Days',0,3],['4-7 Days',4,7],['8-15 Days',8,15],['16-30 Days',16,30],['Above 30 Days',31,999]].map(b=>({bucket:b[0],jobs:jobs.filter(j=>j.ageingDays>=b[1]&&j.ageingDays<=b[2]).length,qty:jobs.filter(j=>j.ageingDays>=b[1]&&j.ageingDays<=b[2]).reduce((a,j)=>a+j.currentQty,0)}));
   const deptQty=['Printing','Lamination','Slitting','Bag Making'].map(d=>({dept:d,qty:jobs.filter(j=>j.currentStage===d).reduce((a,j)=>a+j.currentQty,0),count:byStage(d),avg:Math.round((jobs.filter(j=>j.currentStage===d).reduce((a,j)=>a+j.ageingDays,0)/(byStage(d)||1))*10)/10}));
   container.innerHTML=`
-    <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-      <div>
-        <div style="font-size:13px;font-weight:600;color:var(--cyan)">📦 Work In Process Dashboard</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px">Real-time visibility from Printing to Dispatch</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--cyan)">📦 WIP Dashboard</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">Printing → Dispatch</div>
       </div>
-      <div style="display:flex;gap:16px;align-items:center">
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
         <div style="text-align:right">
           <div style="font-size:10px;color:var(--text3)">ERP Last Synced</div>
           <div style="font-size:12px;font-weight:600;color:var(--green)" id="wip-erp-sync-time">
@@ -3904,12 +3966,12 @@ function renderWIP(container){
       <div class="kpi-card red"><div class="kpi-value">${qHold}</div><div class="kpi-label">Quality Hold Jobs</div><div class="kpi-target">Jobs under quality hold</div></div>
       <div class="kpi-card orange"><div class="kpi-value">${delayed}</div><div class="kpi-label">Delayed Jobs</div><div class="kpi-target">Exceeding planned completion date</div></div>
     </div>
-    <div class="filter-bar">
-      <input type="text" id="wip-global-search" placeholder="SAP / SFG / Job / Customer / Design Structure" style="width:360px" oninput="filterWIPDashboard()">
-      <select id="wip-stage-filter" onchange="filterWIPDashboard()"><option value="">All Stages</option><option>Printing</option><option>Lamination</option><option>Slitting</option><option>Bag Making</option><option>Dispatch</option></select>
-      <select id="wip-quality-filter" onchange="filterWIPDashboard()"><option value="">All Quality Status</option><option>PASS</option><option>HOLD</option><option>REWORK</option><option>REJECT</option></select>
+    <div class="filter-bar" style="flex-wrap:wrap;gap:6px">
+      <input type="text" id="wip-global-search" placeholder="Search SAP / SFG / Job…" style="flex:1;min-width:160px;max-width:100%" oninput="filterWIPDashboard()">
+      <select id="wip-stage-filter" onchange="filterWIPDashboard()" style="flex:1;min-width:120px"><option value="">All Stages</option><option>Printing</option><option>Lamination</option><option>Slitting</option><option>Bag Making</option><option>Dispatch</option></select>
+      <select id="wip-quality-filter" onchange="filterWIPDashboard()" style="flex:1;min-width:120px"><option value="">All Quality</option><option>PASS</option><option>HOLD</option><option>REWORK</option><option>REJECT</option></select>
       <button class="btn btn-outline btn-sm" onclick="document.getElementById('wip-global-search').value='';document.getElementById('wip-stage-filter').value='';document.getElementById('wip-quality-filter').value='';filterWIPDashboard()">Clear</button>
-      <span id="wip-search-info" class="badge badge-blue">${jobs.length} jobs found</span>
+      <span id="wip-search-info" class="badge badge-blue">${jobs.length} jobs</span>
     </div>
     <div id="wip-job-master-wrap">${wipJobMasterTable(jobs)}</div>
     ${isAdmin()?`
@@ -3928,18 +3990,20 @@ function renderWIP(container){
     <div id="wip-drilldown"></div>
     <div class="charts-grid">
       <div class="chart-card"><div class="chart-header"><div><div class="chart-title">Job Progress Tracker</div><div class="chart-subtitle">Printing → Lamination → Slitting → Bag Making → Dispatch progress by current stage</div></div></div><div class="chart-wrap"><canvas id="wip-progress-chart"></canvas></div></div>
-    </div>
-    <div class="charts-grid">
       <div class="chart-card"><div class="chart-header"><div><div class="chart-title">Ageing Analysis</div><div class="chart-subtitle">Job count and quantity by ageing bucket</div></div></div><div class="chart-wrap"><canvas id="wip-ageing-chart"></canvas></div></div>
       <div class="chart-card"><div class="chart-header"><div><div class="chart-title">WIP Summary Department Wise Quantity</div><div class="chart-subtitle">Printing, Lamination, Slitting, Bag Making and total WIP quantity</div></div></div><div class="chart-wrap"><canvas id="wip-summary-chart"></canvas></div></div>
+      <div class="chart-card"><div class="chart-header"><div><div class="chart-title">Quality Status Breakdown</div><div class="chart-subtitle">PASS / HOLD / REWORK / REJECT across all WIP jobs</div></div></div><div class="chart-wrap"><canvas id="wip-quality-chart"></canvas></div></div>
     </div><div style="overflow-x:auto"><table><thead><tr><th>Job No</th><th>Front Panel</th><th>Back Panel</th><th>Side Gusset</th><th>Zipper</th><th>Result</th></tr></thead><tbody>${jobs.slice(0,8).map((j,i)=>`<tr><td>${safeText(j.jobNo)}</td><td>${wipBadge('Ready')}</td><td>${wipBadge('Ready')}</td><td>${wipBadge(i%3===0?'Pending':'Ready')}</td><td>${wipBadge(i%4===0?'Pending':'Ready')}</td><td>${wipBadge((i%3===0||i%4===0)?'Not Ready For Bag Making':'Ready For Bag Making')}</td></tr>`).join('')}</tbody></table></div></div>
   `;
   setTimeout(()=>{
     const chartDefaults={responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8b949e',font:{size:10}}}},scales:{x:{ticks:{color:'#6e7681',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#6e7681',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}}}};
-    ['wipProgress','wipAgeing','wipSummary'].forEach(k=>{if(APP.chartInstances[k]) APP.chartInstances[k].destroy();});
+    ['wipProgress','wipAgeing','wipSummary','wipQuality'].forEach(k=>{if(APP.chartInstances[k]) APP.chartInstances[k].destroy();});
     const c1=document.getElementById('wip-progress-chart'); if(c1) APP.chartInstances.wipProgress=new Chart(c1,{type:'bar',data:{labels:['Printing','Lamination','Slitting','Bag Making','Dispatch'],datasets:[{label:'Jobs',data:['Printing','Lamination','Slitting','Bag Making','Dispatch'].map(byStage),borderRadius:5}]},options:chartDefaults});
     const c3=document.getElementById('wip-ageing-chart'); if(c3) APP.chartInstances.wipAgeing=new Chart(c3,{type:'bar',data:{labels:ageingBuckets.map(x=>x.bucket),datasets:[{label:'Job Count',data:ageingBuckets.map(x=>x.jobs),borderRadius:5},{label:'Quantity',data:ageingBuckets.map(x=>x.qty),borderRadius:5}]},options:{...chartDefaults,plugins:{...chartDefaults.plugins,upValueLabels:{display:false}}}});
     const c4=document.getElementById('wip-summary-chart'); if(c4) APP.chartInstances.wipSummary=new Chart(c4,{type:'bar',data:{labels:[...deptQty.map(x=>x.dept),'Total WIP'],datasets:[{label:'WIP Quantity',data:[...deptQty.map(x=>x.qty),totalQty],borderRadius:5}]},options:chartDefaults});
+    const qStatuses=['PASS','HOLD','REWORK','REJECT'];
+    const qCounts=qStatuses.map(s=>jobs.filter(j=>j.qualityStatus===s).length);
+    const c5=document.getElementById('wip-quality-chart'); if(c5) APP.chartInstances.wipQuality=new Chart(c5,{type:'doughnut',data:{labels:qStatuses,datasets:[{data:qCounts,backgroundColor:['rgba(63,185,80,.75)','rgba(248,81,73,.75)','rgba(240,136,62,.75)','rgba(163,113,247,.75)'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'right',labels:{color:'#8b949e',font:{size:10},boxWidth:10}}}}});
   },100);
 }
 
@@ -4924,8 +4988,8 @@ function jptRenderWIP(allPlanRows){
     </div>
 
     <!-- SECTION 5 - ALL ORDERS TABLE -->
-    <div class="table-card">
-      <div class="table-header">
+    <div class="table-card" style="padding:0">
+      <div class="table-header" style="padding:10px 14px">
         <div class="table-title">All Orders - WIP Breakdown (WIP_ORDER_LINK)</div>
         <div style="font-size:11px;color:var(--text2)">${rows.length} orders · click any row to expand production history</div>
       </div>
@@ -5894,15 +5958,43 @@ window.generateProductionReport = function(monthOverride){
   })();
 
   function n(v){ if(v===undefined||v===null||v==='') return 0; const x=parseFloat(String(v).replace(/,/g,'')); return isNaN(x)?0:x; }
+  // Robust date parser: handles ISO (2026-07-01), DD-MMM-YY (01-Jul-26),
+  // DD/MM/YYYY (01/07/2026), serial numbers, and locale strings.
+  function parseDateRobust(dateStr){
+    if(!dateStr && dateStr!==0) return null;
+    const s = String(dateStr).trim();
+    if(!s) return null;
+    // Serial number (Excel/Sheets): days since 1899-12-30
+    const serial = parseFloat(s);
+    if(!isNaN(serial) && serial > 1 && serial < 100000 && !/[A-Za-z\-\/]/.test(s)){
+      const d = new Date(Math.round((serial - 25569) * 86400000));
+      return isNaN(d) ? null : d;
+    }
+    // Try native parse first (works for ISO 2026-07-01)
+    let d = new Date(s);
+    if(!isNaN(d)) return d;
+    // DD-MMM-YY or DD-MMM-YYYY (01-Jul-26 / 01-Jul-2026)
+    const m1 = s.match(/^(\d{1,2})[-\/\s]([A-Za-z]{3})[-\/\s](\d{2,4})$/);
+    if(m1){
+      const months={'jan':0,'feb':1,'mar':2,'apr':3,'may':4,'jun':5,'jul':6,'aug':7,'sep':8,'oct':9,'nov':10,'dec':11};
+      const mo = months[m1[2].toLowerCase()]; if(mo===undefined) return null;
+      let yr = parseInt(m1[3],10); if(yr < 100) yr += 2000;
+      d = new Date(yr, mo, parseInt(m1[1],10));
+      return isNaN(d) ? null : d;
+    }
+    // DD/MM/YYYY
+    const m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if(m2){ d = new Date(parseInt(m2[3],10), parseInt(m2[2],10)-1, parseInt(m2[1],10)); return isNaN(d)?null:d; }
+    return null;
+  }
   function ymKey(dateStr){
-    // Accept ISO or DD-MMM-YY / DD/MM/YYYY style — normalize to 'Mon-YY'
-    const d = new Date(dateStr);
-    if(isNaN(d)) return '';
+    const d = parseDateRobust(dateStr);
+    if(!d) return '';
     return d.toLocaleString('en',{month:'short'})+'-'+String(d.getFullYear()).slice(2);
   }
   function dayOfMonth(dateStr){
-    const d = new Date(dateStr);
-    return isNaN(d) ? null : d.getDate();
+    const d = parseDateRobust(dateStr);
+    return d ? d.getDate() : null;
   }
   function daysInMonth(mKey){
     // mKey like 'Jul-26' → figure out year+month, return count of days
@@ -5917,10 +6009,27 @@ window.generateProductionReport = function(monthOverride){
     const raw = r.PRODUCTION_DATE||r.date||'';
     return ymKey(raw)===month;
   });
-  const disp = (APP.dispatchData||[]).filter(r=>{
-    const raw = r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE||r.DATE||r.DISPATCHED_DATE||r['DISPATCH DATE']||'';
-    return ymKey(raw)===month;
-  });
+  // ---- Dispatch data: use upDispatch normalized rows (PRIMARY) or raw fallback ----
+  // New dispatch schema: single DISPATCHED(KG) col + PLANT/TYPE for UP/UF/Export.
+  // APP.upDispatchData has _cat, _kg, _month, _iso already classified.
+  // APP.dispatchData raw rows have NO UP_DISPATCH / UF_DISPATCH / EXPORT_DISPATCH cols.
+  const _upDisp  = Array.isArray(APP.upDispatchData) ? APP.upDispatchData : [];
+  const _dispMonth = _upDisp.filter(r=>r._month===month);
+
+  // Classify raw rows if upDispatchData is empty (fallback)
+  function _classifyPlant(p){ const u=String(p||'').toUpperCase(); if(u.includes('EXPORT')) return 'Export'; if(u.includes('UF')) return 'UF'; return 'UP'; }
+  function _rawDispMonth(){
+    const rows=(APP.dispatchData||[]).filter(r=>{
+      const raw=r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE||r.DATE||r.DISPATCHED_DATE||r['DISPATCH DATE']||'';
+      return ymKey(raw)===month;
+    });
+    return rows.map(r=>({
+      _cat: _classifyPlant(r.PLANT_TYPE||r['PLANT/TYPE']||r.PLANTTYPE||r.PLANT||r.TYPE||''),
+      _kg: n(r['DISPATCHED (KG)']||r.DISPATCHED_KG||r.DISPATCH_KG||r.DISPATCHED||r.UP_DISPATCH||r['UP DISPATCH']||r.UF_DISPATCH||r['UF DISPATCH']||r.EXPORT_DISPATCH||r['EXPORT DISPATCH']||0),
+      _iso: r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE||r.DATE||''
+    }));
+  }
+  const disp = _dispMonth.length ? _dispMonth : _rawDispMonth();
 
   const nDays = daysInMonth(month);
   const days = Array.from({length:nDays},(_,i)=>i+1);
@@ -5928,23 +6037,17 @@ window.generateProductionReport = function(monthOverride){
   function deptRowsForDay(dept, day){
     return prod.filter(r=>r.dept===dept && dayOfMonth(r.PRODUCTION_DATE||r.date)===day);
   }
-  function resolveDispatchCategory(r){
-    const plant=String(r['PLANT/TYPE']||r['PLANT_TYPE']||r['PLANTTYPE']||r['PLANT']||r['TYPE']||'').trim().toUpperCase();
-    if(/EXPORT/.test(plant)) return 'Export';
-    if(/UF/.test(plant)) return 'UF';
-    return 'UP';
-  }
-  function resolveDispatchKg(r){
-    const keys=['DISPATCHED (KG)','DISPATCHED_KG','DISPATCHED KG','DISPATCH KG','DISPATCHEDKG','DISPATCHED','QTY KG','QUANTITY KG','KG','QTY','QUANTITY'];
-    for(const k of keys){ if(r[k]!==undefined && r[k]!=='') return n(r[k]); }
-    return 0;
-  }
-  function isBagJobType(r){
-    const jt = String(r['JOB_TYPE']||r['JOBTYPE']||r['JOB TYPE']||'').trim().toUpperCase();
-    return jt.includes('BAG');
-  }
+  // Resolvers: read _cat/_kg from normalized dispatch rows
+  function resolveUpDispatch(r){ return r._cat==='UP' ? (r._kg||0) : 0; }
+  function resolveUfDispatch(r){ return r._cat==='UF' ? (r._kg||0) : 0; }
+  function resolveExportDispatch(r){ return r._cat==='Export' ? (r._kg||0) : 0; }
   function dispatchRowsForDay(day){
-    return disp.filter(r=>dayOfMonth(r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE)===day);
+    return disp.filter(r=>{
+      const iso = r._iso||'';
+      if(!iso) return false;
+      const d = parseDateRobust(iso);
+      return d ? d.getDate()===day : false;
+    });
   }
 
   // Per-day aggregation
@@ -5961,11 +6064,16 @@ window.generateProductionReport = function(monthOverride){
     const bgTon   = bg.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000;
     const bgPcs   = bg.reduce((a,r)=>a+n(r.PRODUCTION_PCS||r.productionPcs),0);
 
-    const upTon = dr.filter(r=>resolveDispatchCategory(r)==='UP').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
-    const ufTon = dr.filter(r=>resolveDispatchCategory(r)==='UF').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
-    const expQty= dr.filter(r=>resolveDispatchCategory(r)==='Export').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
-    // Bag/Pouch = Dispatch Master rows where JOB_TYPE contains "BAG" — sum Column L (ROLLS/BAGS)
-    const bagPouchCount = dr.filter(isBagJobType).reduce((a,r)=>a+n(r.ROLLSBAGS||r['ROLLS/BAGS']||r['ROLLS_BAGS']),0);
+    // UP/UF/Export Dispatch — dedicated columns in DISPATCH_IMPORT (Tons)
+    const upTon = dr.reduce((a,r)=>a+resolveUpDispatch(r),0)/1000;
+    const ufTon = dr.reduce((a,r)=>a+resolveUfDispatch(r),0)/1000;
+    const expQty= dr.reduce((a,r)=>a+resolveExportDispatch(r),0)/1000;
+    // Bag/Pouch = cells.bagqty from normalized dispatch rows
+    const bagPouchCount = dr.reduce((a,r)=>{
+      // normalized row has cells.bagqty; raw fallback has BAG_QTY
+      const v = (r.cells&&r.cells.bagqty) ? r.cells.bagqty : (r.BAG_QTY||r['BAG QTY']||0);
+      return a+n(v);
+    },0);
 
     return {
       day, prMeter, prTon:(pr.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000),
@@ -5986,10 +6094,11 @@ window.generateProductionReport = function(monthOverride){
   const f2=x=>(x||0).toFixed(2);
   const f0=x=>Math.round(x||0).toLocaleString();
   const genTime = new Date().toLocaleString('en-PK',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true});
-  const dispatchWarning = (disp.length===0 && (APP.dispatchData||[]).length>0)
-    ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:10px;color:#92400e">⚠ Dispatch data exists (${(APP.dispatchData||[]).length} total rows) but none matched period <b>${month}</b> — check the date field on the Dispatch sheet, or Sync Now to refresh.</div>`
-    : (disp.length===0 && (APP.dispatchData||[]).length===0)
-    ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:10px;color:#92400e">⚠ No Dispatch data loaded at all — click Sync Now on the Dispatch tab, then regenerate this report.</div>`
+  const _totalDispRows = (Array.isArray(APP.upDispatchData)?APP.upDispatchData:[]).length || (APP.dispatchData||[]).length;
+  const dispatchWarning = (disp.length===0 && _totalDispRows>0)
+    ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:10px;color:#92400e">⚠ Dispatch data exists (${_totalDispRows} total rows) but none matched period <b>${month}</b> — check date on Dispatch sheet or Sync Now.</div>`
+    : (disp.length===0 && _totalDispRows===0)
+    ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:10px;color:#92400e">⚠ No Dispatch data loaded — click Sync Now on the Dispatch tab, then regenerate.</div>`
     : '';
   const nRows = rows.length;
 
@@ -6075,10 +6184,25 @@ window.generateProductionReport = function(monthOverride){
       <div class="tons">${f2(tot.bgTon)}<span class="unit">TON</span></div>
       <div class="meters">Pcs: <b>${f0(tot.bgPcs)}</b></div>
     </div>
-    <div class="kpi" style="border-top-color:#f778ba">
-      <div class="dept">Dispatch</div>
-      <div class="tons">${f2(tot.upTon+tot.ufTon+tot.expQty)}<span class="unit">TON</span></div>
-      <div class="meters">Bag/Pouch: <b>${f0(tot.bagPouchCount)}</b></div>
+    <div class="kpi" style="border-top-color:#22d3ee">
+      <div class="dept">UP Dispatch</div>
+      <div class="tons">${f2(tot.upTon)}<span class="unit">TON</span></div>
+      <div class="meters">UP TON</div>
+    </div>
+    <div class="kpi" style="border-top-color:#3fb950">
+      <div class="dept">UF Dispatch</div>
+      <div class="tons">${f2(tot.ufTon)}<span class="unit">TON</span></div>
+      <div class="meters">UF TON</div>
+    </div>
+    <div class="kpi" style="border-top-color:#a371f7">
+      <div class="dept">Export Dispatch</div>
+      <div class="tons">${f2(tot.expQty)}<span class="unit">TON</span></div>
+      <div class="meters">EXPORT TON</div>
+    </div>
+    <div class="kpi" style="border-top-color:#ec4899">
+      <div class="dept">Bag Dispatch</div>
+      <div class="tons">${f0(tot.bagPouchCount)}</div>
+      <div class="meters">BAG_QTY (Pcs)</div>
     </div>
   </div>
 
@@ -6092,7 +6216,7 @@ window.generateProductionReport = function(monthOverride){
       </tr>
       <tr>
         <th>Meter</th><th>Ton</th><th>Meter</th><th>Ton</th><th>Meter</th><th>Ton</th>
-        <th>Ton</th><th>Pcs</th><th>UP Ton</th><th>UF Ton</th><th>Export Qty</th><th>Bag/Pouch</th>
+        <th>Ton</th><th>Pcs</th><th>UP TON</th><th>UF TON</th><th>EXPORT TON</th><th>Bag/Pouch</th>
       </tr>
     </thead>
     <tbody>
@@ -6138,8 +6262,9 @@ window.downloadProductionReportExcel = function(monthOverride){
   })();
 
   function n(v){ if(v===undefined||v===null||v==='') return 0; const x=parseFloat(String(v).replace(/,/g,'')); return isNaN(x)?0:x; }
-  function ymKey(dateStr){ const d=new Date(dateStr); return isNaN(d)?'':d.toLocaleString('en',{month:'short'})+'-'+String(d.getFullYear()).slice(2); }
-  function dayOfMonth(dateStr){ const d=new Date(dateStr); return isNaN(d)?null:d.getDate(); }
+  function parseDateRobust(s){ s=String(s||'').trim(); if(!s) return null; const ser=parseFloat(s); if(!isNaN(ser)&&ser>1&&ser<100000&&!/[A-Za-z\-\/]/.test(s)){ const d=new Date(Math.round((ser-25569)*86400000)); return isNaN(d)?null:d; } let d=new Date(s); if(!isNaN(d)) return d; const m1=s.match(/^(\d{1,2})[\-\/\s]([A-Za-z]{3})[\-\/\s](\d{2,4})$/); if(m1){ const mo={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11}[m1[2].toLowerCase()]; if(mo===undefined) return null; let yr=parseInt(m1[3],10); if(yr<100) yr+=2000; d=new Date(yr,mo,parseInt(m1[1],10)); return isNaN(d)?null:d; } const m2=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); if(m2){ d=new Date(parseInt(m2[3],10),parseInt(m2[2],10)-1,parseInt(m2[1],10)); return isNaN(d)?null:d; } return null; }
+  function ymKey(dateStr){ const d=parseDateRobust(dateStr); return d?d.toLocaleString('en',{month:'short'})+'-'+String(d.getFullYear()).slice(2):''; }
+  function dayOfMonth(dateStr){ const d=parseDateRobust(dateStr); return d?d.getDate():null; }
   function daysInMonth(mKey){
     const parts=mKey.split('-'); const monthsAbbr=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const mi=monthsAbbr.findIndex(x=>x.toLowerCase()===parts[0].toLowerCase()); const yr=2000+parseInt(parts[1],10);
@@ -6147,34 +6272,36 @@ window.downloadProductionReportExcel = function(monthOverride){
   }
 
   const prod = (APP.productionData||[]).filter(r=>ymKey(r.PRODUCTION_DATE||r.date||'')===month);
-  const disp = (APP.dispatchData||[]).filter(r=>ymKey(r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE||'')===month);
+  // ---- Dispatch data: use upDispatch normalized rows (PRIMARY) or raw fallback ----
+  function parseDateRobust(s){ s=String(s||'').trim(); if(!s) return null; const ser=parseFloat(s); if(!isNaN(ser)&&ser>1&&ser<100000&&!/[A-Za-z\-\/]/.test(s)){ const d=new Date(Math.round((ser-25569)*86400000)); return isNaN(d)?null:d; } let d=new Date(s); if(!isNaN(d)) return d; const m1=s.match(/^(\d{1,2})[\-\/\s]([A-Za-z]{3})[\-\/\s](\d{2,4})$/); if(m1){ const mo={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11}[m1[2].toLowerCase()]; if(mo===undefined) return null; let yr=parseInt(m1[3],10); if(yr<100) yr+=2000; d=new Date(yr,mo,parseInt(m1[1],10)); return isNaN(d)?null:d; } const m2=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); if(m2){ d=new Date(parseInt(m2[3],10),parseInt(m2[2],10)-1,parseInt(m2[1],10)); return isNaN(d)?null:d; } return null; }
+  function _classifyPlantEx(p){ const u=String(p||'').toUpperCase(); if(u.includes('EXPORT')) return 'Export'; if(u.includes('UF')) return 'UF'; return 'UP'; }
+  const _upDispEx = Array.isArray(APP.upDispatchData) ? APP.upDispatchData : [];
+  const _dispMonthEx = _upDispEx.filter(r=>r._month===month);
+  function _rawDispMonthEx(){
+    return (APP.dispatchData||[]).filter(r=>ymKey(r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE||r.DATE||r['DISPATCH DATE']||r.DISPATCHED_DATE||'')===month).map(r=>({
+      _cat:_classifyPlantEx(r.PLANT_TYPE||r['PLANT/TYPE']||r.PLANTTYPE||r.PLANT||r.TYPE||''),
+      _kg:n(r['DISPATCHED (KG)']||r.DISPATCHED_KG||r.DISPATCH_KG||r.DISPATCHED||r.UP_DISPATCH||r['UP DISPATCH']||r.UF_DISPATCH||r['UF DISPATCH']||r.EXPORT_DISPATCH||r['EXPORT DISPATCH']||0),
+      _iso:r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE||r.DATE||''
+    }));
+  }
+  const disp = _dispMonthEx.length ? _dispMonthEx : _rawDispMonthEx();
   const nDays = daysInMonth(month);
   const days = Array.from({length:nDays},(_,i)=>i+1);
-
   function deptRowsForDay(dept,day){ return prod.filter(r=>r.dept===dept && dayOfMonth(r.PRODUCTION_DATE||r.date)===day); }
-  function resolveDispatchCategory(r){
-    const plant=String(r['PLANT/TYPE']||r['PLANT_TYPE']||r['PLANTTYPE']||r['PLANT']||r['TYPE']||'').trim().toUpperCase();
-    if(/EXPORT/.test(plant)) return 'Export'; if(/UF/.test(plant)) return 'UF'; return 'UP';
-  }
-  function resolveDispatchKg(r){
-    const keys=['DISPATCHED (KG)','DISPATCHED_KG','DISPATCHED KG','DISPATCH KG','DISPATCHEDKG','DISPATCHED','QTY KG','QUANTITY KG','KG','QTY','QUANTITY'];
-    for(const k of keys){ if(r[k]!==undefined && r[k]!=='') return n(r[k]); } return 0;
-  }
-  function isBagJobType(r){
-    const jt = String(r['JOB_TYPE']||r['JOBTYPE']||r['JOB TYPE']||'').trim().toUpperCase();
-    return jt.includes('BAG');
-  }
-  function dispatchRowsForDay(day){ return disp.filter(r=>dayOfMonth(r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE)===day); }
+  function resolveUpDispatch(r){ return r._cat==='UP'?(r._kg||0):0; }
+  function resolveUfDispatch(r){ return r._cat==='UF'?(r._kg||0):0; }
+  function resolveExportDispatch(r){ return r._cat==='Export'?(r._kg||0):0; }
+  function dispatchRowsForDay(day){ return disp.filter(r=>{ const d=parseDateRobust(r._iso||''); return d?d.getDate()===day:false; }); }
 
   const rows = days.map(day=>{
     const pr=deptRowsForDay('Printing',day), la=deptRowsForDay('Lamination',day), sl=deptRowsForDay('Slitting',day), bg=deptRowsForDay('Bag Making',day);
     const dr=dispatchRowsForDay(day);
     const prMeter=pr.reduce((a,r)=>a+n(r.PRODUCTION_METER),0), laMeter=la.reduce((a,r)=>a+n(r.PRODUCTION_METER),0), slMeter=sl.reduce((a,r)=>a+n(r.PRODUCTION_METER),0);
     const bgTon=bg.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000, bgPcs=bg.reduce((a,r)=>a+n(r.PRODUCTION_PCS||r.productionPcs),0);
-    const upTon=dr.filter(r=>resolveDispatchCategory(r)==='UP').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
-    const ufTon=dr.filter(r=>resolveDispatchCategory(r)==='UF').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
-    const expQty=dr.filter(r=>resolveDispatchCategory(r)==='Export').reduce((a,r)=>a+resolveDispatchKg(r),0)/1000;
-    const bagPouchCount=dr.filter(isBagJobType).reduce((a,r)=>a+n(r.ROLLSBAGS||r['ROLLS/BAGS']||r['ROLLS_BAGS']),0);
+    const upTon=dr.reduce((a,r)=>a+resolveUpDispatch(r),0)/1000;
+    const ufTon=dr.reduce((a,r)=>a+resolveUfDispatch(r),0)/1000;
+    const expQty=dr.reduce((a,r)=>a+resolveExportDispatch(r),0)/1000;
+    const bagPouchCount=dr.reduce((a,r)=>{ const v=(r.cells&&r.cells.bagqty)?r.cells.bagqty:(r.BAG_QTY||r['BAG QTY']||0); return a+n(v); },0);
     return {
       day, prMeter, prTon:(pr.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000),
       laMeter, laTon:(la.reduce((a,r)=>a+n(r.PRODUCTION_KG),0)/1000),
@@ -6193,7 +6320,7 @@ window.downloadProductionReportExcel = function(monthOverride){
   const csvEsc=v=>{ const s=String(v); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; };
 
   const header1=['Date','Printing','','Lamination','','Slitting','','Bag Making','','Dispatch','','',''];
-  const header2=['','Meter','Ton','Meter','Ton','Meter','Ton','Ton','Pcs','UP Ton','UF Ton','Export Qty','Bag/Pouch'];
+  const header2=['','Meter','Ton','Meter','Ton','Meter','Ton','Ton','Pcs','UP TON','UF TON','EXPORT TON','Bag/Pouch'];
   const lines=[header1,header2];
   rows.forEach(r=>lines.push([
     `${String(r.day).padStart(2,'0')}-${month}`, f0(r.prMeter),f2(r.prTon), f0(r.laMeter),f2(r.laTon),
@@ -6665,21 +6792,92 @@ function applyLogos(){
 
 function renderSettingsTargets(){
   const c=document.getElementById('settings-panel');
+  // Live ERP value lookup per KPI
+  function _liveVal(t){
+    const m=APP.currentMonth;
+    const d=(APP.productionData||[]).filter(r=>r.month===m&&(t.dept==='All'||!t.dept||r.dept===t.dept));
+    const kl=(t.kpi||'').toLowerCase();
+    if(kl.includes('ton')||kl.includes('production')){
+      const tons=d.reduce((a,r)=>a+(+(r.productionKg||r.PRODUCTION_KG||0)),0)/1000;
+      return tons.toFixed(2);
+    }
+    if(kl.includes('pcs')||kl.includes('bag')){
+      const pcs=d.reduce((a,r)=>a+(+(r.productionPcs||r.PRODUCTION_PCS||r.production||0)),0);
+      return pcs>=1e6?(pcs/1e6).toFixed(2)+'M':Math.round(pcs/1000)+'K';
+    }
+    if(kl.includes('ee')){
+      const eeVals=d.filter(r=>r.ee>0); return eeVals.length?(eeVals.reduce((a,r)=>a+r.ee,0)/eeVals.length*100).toFixed(1)+'%':'-';
+    }
+    if(kl.includes('oee')){
+      const oeeVals=d.filter(r=>r.oee>0); return oeeVals.length?(oeeVals.reduce((a,r)=>a+r.oee,0)/oeeVals.length*100).toFixed(1)+'%':'-';
+    }
+    if(kl.includes('waste')){
+      const prod=d.reduce((a,r)=>a+(+(r.productionKg||0)),0);
+      const w=d.reduce((a,r)=>a+(+(r.waste||0)),0);
+      return prod>0?(w/prod*100).toFixed(2)+'%':'-';
+    }
+    if(kl.includes('dispatch')||kl.includes('up ton')||kl.includes('uf ton')){
+      const norm=Array.isArray(APP.upDispatchData)?APP.upDispatchData:[];
+      const cat=kl.includes('uf')?'UF':kl.includes('export')?'Export':'UP';
+      const tons=norm.filter(r=>r._month===m&&r._cat===cat).reduce((a,r)=>a+(r._kg||0),0)/1000;
+      return tons.toFixed(2);
+    }
+    return '-';
+  }
+  function _pct(t){
+    const raw=_liveVal(t);
+    const num=parseFloat(raw);
+    if(isNaN(num)||!t.target) return null;
+    return (num/t.target)*100;
+  }
   c.innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h3 style="font-family:'Rajdhani',sans-serif">KPI Targets</h3>
+      <div>
+        <h3 style="font-family:'Rajdhani',sans-serif;margin-bottom:2px">KPI Targets
+          <span class="badge badge-blue" style="font-size:9px;margin-left:6px">vs ${APP.currentMonth}</span>
+        </h3>
+        <div style="font-size:11px;color:var(--text3)">Live actual vs target — data from current month (${APP.currentMonth}). Add targets in Settings to track KPIs across departments.</div>
+      </div>
       <button class="btn btn-primary btn-sm" onclick="openAddTargetModal()">+ Add Target</button>
     </div>
-    <div class="table-card"><table>
-      <thead><tr><th>Department</th><th>KPI Name</th><th>Target</th><th>Unit</th><th>Direction</th><th>Frequency</th><th>Action</th></tr></thead>
-      <tbody>${APP.targets.map((t,i)=>`<tr>
-        <td>${t.dept}</td><td>${t.kpi}</td>
-        <td style="font-weight:600">${t.target}</td><td>${t.unit}</td>
-        <td><span class="badge ${t.direction==='Higher'?'badge-green':'badge-red'}">${t.direction}</span></td>
-        <td>${t.freq}</td>
-        <td><button class="btn btn-outline btn-sm" onclick="editTarget(${i})">Edit</button></td>
-      </tr>`).join('')}</tbody>
-    </table></div>`;
+    ${APP.targets.length===0?'<div class="alert alert-info">No targets configured yet. Click <b>+ Add Target</b> to set your first KPI target.</div>':''}
+    ${APP.targets.length>0?`<div class="table-card" style="padding:0"><div style="overflow:auto;max-height:calc(100vh - 220px)"><table style="border-collapse:separate;border-spacing:0">
+      <thead><tr>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Department</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">KPI Name</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Target</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Unit</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Actual (${APP.currentMonth})</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Achievement</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Direction</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Freq</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Action</th>
+      </tr></thead>
+      <tbody>${APP.targets.map((t,i)=>{
+        const actual=_liveVal(t);
+        const pct=_pct(t);
+        const hit = pct!==null && (t.direction==='Higher'?pct>=100:pct<=100);
+        const pctStr = pct!==null?pct.toFixed(1)+'%':'-';
+        const bar = pct!==null?`<div style="height:4px;width:100%;background:var(--border);border-radius:2px;margin-top:4px"><div style="height:4px;width:${Math.min(pct,100).toFixed(0)}%;background:${hit?'var(--green)':'var(--red)'};border-radius:2px"></div></div>`:'';
+        return `<tr>
+          <td>${t.dept||'All'}</td>
+          <td style="font-weight:600">${t.kpi}</td>
+          <td style="font-weight:700;color:var(--cyan)">${t.target}</td>
+          <td>${t.unit}</td>
+          <td style="font-weight:700;color:${hit?'var(--green)':'var(--red)'};">${actual}${bar}</td>
+          <td><span class="badge ${hit?'badge-green':'badge-red'}">${pctStr}</span></td>
+          <td><span class="badge ${t.direction==='Higher'?'badge-green':'badge-red'}">${t.direction}</span></td>
+          <td>${t.freq}</td>
+          <td><button class="btn btn-outline btn-sm" onclick="editTarget(${i})">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteTarget(${i})">✕</button></td>
+        </tr>`;}).join('')}
+      </tbody>
+    </table></div></div>`:''}`;
+}
+function deleteTarget(i){
+  if(!confirm('Delete this target?')) return;
+  APP.targets.splice(i,1);
+  try{localStorage.setItem('up_targets_v28',JSON.stringify(APP.targets));}catch(e){}
+  if(APP.currentPage==='settings') renderSettingsTargets();
 }
 
 function openAddTargetModal(){
@@ -8521,12 +8719,21 @@ function normalizeProductionRow(row){
   const productionMin=+(String(row.PRODUCTION_MIN||row.PRODUCTION_MINS||row.PRODUCTION_RUNNING_MIN||row.productionMin||0).replace(/,/g,''));
   const totalJobTimeMin=+(String(row.TOTAL_JOB_TIME_MIN||row.totalJobTimeMin||0).replace(/,/g,''));
   const avgSpeedMM=+(String(row.AVERAGE_SPEED_MM||row.AVERAGE_SPEED_M_M||row.averageSpeed||row.standardSpeed||0).replace(/,/g,''));
-  // EE = (Production Meter / Running Min) / Average Speed × 100
-  // EE from sheet (%EE → PCTEE after normalization) or calculate from meter/min/speed
+  // EE = (Production Meter / Adjusted Running Min) / Average Speed × 100
+  // Dept-specific running minutes factor applied to EE ONLY (not OEE):
+  //   Lamination: × 0.75   Slitting: × 0.50   Bag Making: × 0.75   Printing: × 1.0
+  const _EE_DEPT_FACTOR = dept==='Lamination' ? 0.75
+    : dept==='Slitting'   ? 0.50
+    : dept==='Bag Making' ? 0.75
+    : 1.0;
+  // Apply global calcSettings factor on top of dept factor (if admin has overridden)
+  const _globalEEFactor = (typeof APP!=='undefined'&&APP.calcSettings&&APP.calcSettings.eeGlobalFactor)
+    ? APP.calcSettings.eeGlobalFactor : 1;
+  const _eeRunMin = productionMin * _EE_DEPT_FACTOR * _globalEEFactor;
   const sheetEE  = +(row.EE_PCT||row.PCTEE||row.EE||row.ee||0);
   const sheetOEE = +(row.OEE_PCT||row.PCTOEE||row.OEE||row.oee||0);
-  const calcEE = (productionMeter>0 && productionMin>0 && avgSpeedMM>0)
-    ? +((productionMeter/productionMin)/avgSpeedMM*100).toFixed(2)
+  const calcEE = (productionMeter>0 && _eeRunMin>0 && avgSpeedMM>0)
+    ? +(( productionMeter / _eeRunMin ) / avgSpeedMM * 100).toFixed(2)
     : sheetEE;
   const availableMin = totalJobTimeMin - dt - planningDT;
   const calcOEE = (productionMin>0 && availableMin>0)
@@ -8582,9 +8789,33 @@ function fieldValue(r,f,dept){
     SAP_PO: firstRealValue(r,['SAP_PO','sapPO']),
     JOB_NAME: firstRealValue(r,['JOB_NAME','job']),
     TOTAL_JOB_TIME_MIN: displayNumValue(r,['TOTAL_JOB_TIME_MIN','totalJobTimeMin']),
-    // Bag Making: production=PCS, so don't use 'production' as KG fallback
-    PRODUCTION_KG: displayNumValue(r,['PRODUCTION_KG','productionKg']),
-    PRODUCTION_PCS: displayNumValue(r,['PRODUCTION_PCS','productionPcs']),
+    // Bag Making: production=PCS alias; productionKg=KG. Use dept-aware resolution.
+    PRODUCTION_KG: (dept==='Bag Making')
+      ? (function(){
+          // For Bag Making use only KG fields, never 'production' (which = PCS)
+          const v = firstRealValue(r,['PRODUCTION_KG','PRODUCTION KG','productionKg'],'');
+          if(v===''||v===null||v===undefined) return '';
+          const n = parseFloat(String(v).replace(/,/g,''));
+          return isNaN(n)?'':(+n.toFixed(2));
+        })()
+      : displayNumValue(r,['PRODUCTION_KG','productionKg','production']),
+    PRODUCTION_PCS: (dept==='Bag Making')
+      ? (function(){
+          // PCS is always a whole number — find the integer-valued field
+          const candidates = ['PRODUCTION_PCS','PRODUCTION PCS','productionPcs','PRODUCTIONPCS',
+                              'PRODUCTION_IN_PCS','BAG_PCS','OUTPUT_PCS','BAGS_PRODUCED',
+                              'BAG_QTY','TOTAL_PCS','production'];
+          for(const k of candidates){
+            const v = r[k];
+            if(v !== undefined && v !== null && v !== '' && v !== 0 && v !== '0'){
+              const n = parseFloat(String(v).replace(/,/g,''));
+              // Only accept if it's a clean integer or large number (PCS not KG decimals)
+              if(!isNaN(n) && n > 0) return Math.round(n).toLocaleString();
+            }
+          }
+          return '';
+        })()
+      : displayNumValue(r,['PRODUCTION_PCS','productionPcs']),
     PRODUCTION_METER: (function(){ const v=+(r.PRODUCTION_METER||r.productionMeter||0); return v?Math.round(v):0; })(),
     PRODUCTION_MIN: displayNumValue(r,['PRODUCTION_MIN','PRODUCTION_RUNNING_MIN','productionMin','runningMin']),
     PRODUCTION_RUNNING_MIN: displayNumValue(r,['PRODUCTION_RUNNING_MIN','PRODUCTION_MIN','productionMin','runningMin']),
@@ -8622,10 +8853,26 @@ function fieldValue(r,f,dept){
     ADHESIVE_CONSUMED_KG: displayNumValue(r,['ADHESIVE_CONSUMED_KG','adhesiveConsumed']),
     REMARKS: firstRealValue(r,['REMARKS','remarks']),
     CREATED_BY: firstRealValue(r,['CREATED_BY','createdBy']),
-    CREATED_AT: firstRealValue(r,['CREATED_AT','createdAt'])
+    CREATED_AT: firstRealValue(r,['CREATED_AT','createdAt']),
+    // ---- Bag Making specific columns (all 42 sheet cols covered) ----
+    // Apps Script normalizes spaces+special chars: "PROCESS WASTAGE KG" -> PROCESS_WASTAGE_KG
+    JOB_SETTING_KG: displayNumValue(r,['JOB_SETTING_KG','JOB SETTING KG','jobSettingKg','JOB_SETTING_WEIGHT']),
+    PROCESS_WASTAGE_KG: displayNumValue(r,['PROCESS_WASTAGE_KG','PROCESS WASTAGE KG','PROCESS_WASTE','processWaste','processWastageKg']),
+    SORTING_WASTE_KG: displayNumValue(r,['SORTING_WASTE_KG','SORTING WASTE KG','sortingWasteKg','SORTING_WASTE']),
+    PUNCH_WASTE_KG: displayNumValue(r,['PUNCH_WASTE_KG','PUNCH WASTE KG','punchWasteKg','PUNCH_WASTE']),
+    TRIM_WASTE_KG: displayNumValue(r,['TRIM_WASTE_KG','TRIM WASTE KG','trimWasteKg','TRIM_WASTE']),
+    SLITTING_WASTE_KG: displayNumValue(r,['SLITTING_WASTE_KG','SLITTING WASTE KG','slittingWasteKg','SLITTING_WASTE']),
+    PRINTING_WASTE_KG: displayNumValue(r,['PRINTING_WASTE_KG','PRINTING WASTE KG','printingWasteKg','PRINTING_WASTE']),
+    LAMINATE_WASTE_KG: displayNumValue(r,['LAMINATE_WASTE_KG','LAMINATE WASTE KG','laminateWasteKg','LAMINATE_WASTE','LAMINATION_WASTE_KG','LAMINATION_WASTE']),
+    WASTAGE_IN_PCS: displayNumValue(r,['WASTAGE_IN_PCS','WASTAGE IN PCS','wastageInPcs','WASTE_IN_PCS']),
+    TOTAL_PCS_WASTE_PCT: displayNumValue(r,['TOTAL_PCS_WASTE_PCT','TOTAL PCS WASTE PCT','PCTTOTAL_PCS_WASTE','totalPcsWastePct','PCT_TOTAL_PCS_WASTE']),
+    TECHNICAL_WASTE_KG: displayNumValue(r,['TECHNICAL_WASTE_KG','TECHNICAL WASTE KG','technicalWasteKg','TECHNICAL_WASTE']),
+    INPUT_MATERIAL_KG: displayNumValue(r,['INPUT_MATERIAL_KG','INPUT MATERIAL KG','inputMaterialKg','INPUT_MATERIAL','NET_RAW_MATERIAL_CONSUMED_KG','NET_RAW_MATERIAL_CONSUMED']),
+    ZIPPER_WEIGHT: displayNumValue(r,['ZIPPER_WEIGHT','ZIPPER WEIGHT','zipperWeight','ZIPPER_WT']),
+    SIDE_GUSSET_WEIGHT: displayNumValue(r,['SIDE_GUSSET_WEIGHT','SIDE GUSSET WEIGHT','sideGussetWeight','SIDE_GUSSET_WT','SIDE_GUSSET'])
   };
   if(f==='JOB_SETTING' || f==='NO_OF_JOB_SETTING'){
-    const rawVal = firstRealValue(r,[f,'JOB_SETTING','NO_OF_JOB_SETTING','jobSetting'],'');
+    const rawVal = firstRealValue(r,[f,'JOB_SETTING','NO_OF_JOB_SETTING','COUNT_OF_JOB_','COUNT_OF_JOB','jobSetting'],'');
     if(rawVal === undefined || rawVal === null || rawVal === '' || rawVal === 0 || rawVal === '0') return '';
     const numVal = Number(String(rawVal).replace(/,/g,'').trim());
     if(!isNaN(numVal) && numVal === 1) return 'JOB SETTING';
@@ -8639,13 +8886,47 @@ function fieldValue(r,f,dept){
 renderDeptRows = function(data,dept){
   const fields=DEPT_DETAIL_FIELDS[dept]||DEPT_DETAIL_FIELDS.Printing;
   if(!data.length) return `<tr><td colspan="${fields.length+1}" style="text-align:center;color:var(--text3);padding:20px">No Data Available</td></tr>`;
-  return data.map(r=>`<tr onclick="showRecord(${r.id})" style="cursor:pointer">${fields.map(f=>`<td style="font-size:11px;white-space:nowrap">${fieldValue(r,f,dept)}</td>`).join('')}<td>${hasPermission('edit')?`<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();editRecord(${r.id})">View</button>`:''}</td></tr>`).join('');
+  const isBag = dept==='Bag Making';
+  return data.map(r=>{
+    const pcs = isBag ? (+(r.PRODUCTION_PCS||r.productionPcs||r.production||0)) : 0;
+    const rowStyle = (isBag && pcs===0) ? 'cursor:pointer;color:var(--text3);background:rgba(139,148,158,.04)' : 'cursor:pointer';
+    return `<tr onclick="showRecord(${r.id})" style="${rowStyle}">${fields.map(f=>{
+      const val = fieldValue(r,f,dept);
+      // Highlight key numeric columns for Bag Making
+      const isKeyCol = isBag && (f==='PRODUCTION_PCS'||f==='PRODUCTION_KG'||f==='EE_PCT'||f==='OEE_PCT');
+      const cellStyle = isKeyCol && val && val!='0' ? 'font-size:11px;white-space:nowrap;font-weight:600;color:var(--cyan)' : 'font-size:11px;white-space:nowrap';
+      return `<td style="${cellStyle}">${val}</td>`;
+    }).join('')}<td>${hasPermission('edit')?`<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();editRecord(${r.id})">View</button>`:''}</td></tr>`;
+  }).join('');
 };
 function detailHeader(dept){
+  const isBag = dept==='Bag Making';
+  const LABEL_MAP = {
+    EE_PCT:'%EE', OEE_PCT:'%OEE', TOTAL_WASTE_PCT:'%TOTAL WASTE',
+    AVERAGE_SPEED_MM:'AVG SPEED M/M', TOTAL_PCS_WASTE_PCT:'%TOTAL PCS WASTE',
+    NO_OF_JOB_SETTING: isBag ? 'COUNT OF JOB' : 'JOB SETTING',
+    JOB_SETTING_KG:'JOB SETTING KG', PROCESS_WASTAGE_KG:'PROCESS WASTE KG',
+    SORTING_WASTE_KG:'SORTING WASTE KG', PUNCH_WASTE_KG:'PUNCH WASTE KG',
+    TRIM_WASTE_KG:'TRIM WASTE KG', SLITTING_WASTE_KG:'SLITTING WASTE KG',
+    PRINTING_WASTE_KG:'PRINTING WASTE KG', LAMINATE_WASTE_KG:'LAMINATE WASTE KG',
+    TOTAL_WASTE_KG:'TOTAL WASTE KG', WASTAGE_IN_PCS:'WASTAGE IN PCS',
+    TECHNICAL_WASTE_KG:'TECHNICAL WASTE KG', PROCESS_DOWNTIME_MIN:'PROCESS DT MIN',
+    MECHANICAL_DOWNTIME_MIN:'MECH DT MIN', ELECTRICAL_DOWNTIME_MIN:'ELEC DT MIN',
+    UTILITIES_DOWNTIME_MIN:'UTIL DT MIN', PREVENTIVE_MAINTENANCE_MIN:'PM MIN',
+    TOTAL_TECHNICAL_DOWNTIME_MIN:'TOTAL TECH DT MIN', PLANNING_DOWNTIME_MIN:'PLANNING DT MIN',
+    UNPLANNED_DOWNTIME_MIN:'UNPLANNED DT MIN', INPUT_MATERIAL_KG:'INPUT MAT KG',
+    ZIPPER_WEIGHT:'ZIPPER WT', SIDE_GUSSET_WEIGHT:'SIDE GUSSET WT',
+    PRODUCTION_RUNNING_MIN:'PROD RUNNING MIN', TOTAL_JOB_TIME_MIN:'TOTAL JOB TIME MIN',
+    PRODUCTION_PCS:'PRODUCTION PCS', PRODUCTION_KG:'PRODUCTION KG',
+    PRODUCTION_METER:'PRODUCTION METER', SHIFT_INCHARGE:'SHIFT INCHARGE',
+    SAP_STATUS:'SAP STATUS', MACHINE_NO:'MACHINE NO', SAP_SFG_NO:'SAP SFG NO',
+    JOB_NAME:'JOB NAME', CREATED_BY:'CREATED BY', CREATED_AT:'CREATED AT',
+    PRODUCTION_DATE:'PRODUCTION DATE'
+  };
   return (DEPT_DETAIL_FIELDS[dept]||DEPT_DETAIL_FIELDS.Printing).map(f=>{
-    const lbl = f==='EE_PCT'?'%EE':f==='OEE_PCT'?'%OEE':f==='TOTAL_WASTE_PCT'?'%TOTAL WASTE':f==='AVERAGE_SPEED_MM'?'AVERAGE SPEED M/M':f.replace(/_/g,' ');
-    return `<th style="white-space:nowrap">${lbl}</th>`;
-  }).join('')+'<th>Action</th>';
+    const lbl = LABEL_MAP[f] || f.replace(/_/g,' ');
+    return `<th style="white-space:nowrap;position:sticky;top:0;z-index:2;background:var(--bg2)">${lbl}</th>`;
+  }).join('')+'<th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Action</th>';
 }
 const _origRenderDeptPage = renderDeptPage;
 renderDeptPage = function(container,dept){
@@ -8895,7 +9176,7 @@ function renderDeptDetailTable(dept,data){
       <select id="dept-shift-filter" onchange="filterDeptTable('${dept}')" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none"><option value="">All Shifts</option><option>A</option><option>B</option><option>C</option></select>
     </div>
   </div>
-  <div class="table-card"><div style="overflow-x:auto"><table><thead><tr>${detailHeader(dept)}</tr></thead><tbody id="dept-tbody">${renderDeptRows(data,dept)}</tbody></table></div></div>`;
+  <div class="table-card" style="padding:0"><div style="overflow:auto;max-height:calc(100vh - 280px);border-radius:8px"><table style="border-collapse:separate;border-spacing:0"><thead><tr>${detailHeader(dept)}</tr></thead><tbody id="dept-tbody">${renderDeptRows(data,dept)}</tbody></table></div></div>`;
 }
 renderDeptPage=function(container,dept){
   const data=getMonthData(dept);
@@ -8918,12 +9199,240 @@ renderDeptPage=function(container,dept){
       <div class="tab" onclick="switchDeptTab('detail',this,'${dept}')">📋 Detail Report</div>
       <div class="tab" onclick="switchDeptTab('downtime',this,'${dept}')">⏸ Downtime</div>
       <div class="tab" onclick="switchDeptTab('wastage',this,'${dept}')">♻ Wastage</div>
+      
     </div>
     <div id="dept-tab-content">
       ${deptMachineTabHTML(dept,data,{prod,waste,wasteP,dt,eeA,oeeA,dispProd,dispM,chg,isBag,meters})}
     </div>`;
   setTimeout(()=>deptDrawMachineCharts(dept,data),80);
 };
+
+// ============================================================
+// BAG MAKING DETAIL REPORT — Full rebuild matching sheet exactly
+// 42 columns in 5 groups: BASIC INFO / PRODUCTION / WASTE / DOWNTIME / MATERIAL
+// All columns read directly from normalized row keys — no ambiguity
+// ============================================================
+function renderBagMakingDetailReport(tc, data){
+  const month = FILTER_STATE?.label || APP.currentMonth;
+  const machines = [...new Set(data.map(x=>x.machine||x.MACHINE_NO).filter(Boolean))];
+
+  // Helper formatters
+  function n0(v){ const x=parseFloat(v); return (!isNaN(x)&&x>0)?Math.round(x).toLocaleString():'-'; }
+  function n2(v){ const x=parseFloat(v); return (!isNaN(x)&&x>0)?x.toFixed(2):'-'; }
+  function pct(v){ const x=parseFloat(v); return (!isNaN(x)&&x>0)?(x<1?(x*100).toFixed(1):x.toFixed(1))+'%':'-'; }
+  function str(v){ return v?String(v):'-'; }
+  function fDate(r){
+    const raw=r.PRODUCTION_DATE||r.date||r.DATE||'';
+    if(!raw) return '-';
+    const d=new Date(raw);
+    if(isNaN(d)) return String(raw).slice(0,10);
+    return String(d.getDate()).padStart(2,'0')+'-'+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]+'-'+String(d.getFullYear()).slice(2);
+  }
+  function fPCS(r){
+    // PCS: integer only — try normalized fields first, then raw
+    const candidates=['PRODUCTION_PCS','productionPcs'];
+    for(const k of candidates){
+      const v=r[k]; if(v!==undefined&&v!==null&&v!==''&&v!==0){
+        const n=parseFloat(v); if(!isNaN(n)&&n>0) return Math.round(n).toLocaleString();
+      }
+    }
+    // production alias for Bag Making = PCS
+    if(r.production>0) return Math.round(r.production).toLocaleString();
+    return '0';
+  }
+  function fKG(r){
+    const v=r.productionKg||r.PRODUCTION_KG;
+    const n=parseFloat(v); return (!isNaN(n)&&n>0)?n.toFixed(2):'0';
+  }
+  function fMTR(r){
+    const v=r.productionMeter||r.PRODUCTION_METER;
+    const n=parseFloat(v); return (!isNaN(n)&&n>0)?Math.round(n).toLocaleString():'0';
+  }
+  function fJob(r){
+    const v=r.JOB_SETTING||r.NO_OF_JOB_SETTING||r['COUNT OF JOB']||r.COUNT_OF_JOB;
+    if(!v||v===''||v==='0'||v===0) return '-';
+    const n=parseFloat(v);
+    if(!isNaN(n)&&n===1) return 'JOB SETTING';
+    if(!isNaN(n)&&n>1) return String(n);
+    return String(v);
+  }
+  function fEE(r){ const v=r.EE_PCT||r.ee; const n=parseFloat(v); return (!isNaN(n)&&n>0)?(n<1?(n*100).toFixed(1):n.toFixed(1))+'%':'-'; }
+  function fOEE(r){ const v=r.OEE_PCT||r.oee; const n=parseFloat(v); return (!isNaN(n)&&n>0)?(n<1?(n*100).toFixed(1):n.toFixed(1))+'%':'-'; }
+  function fWastePct(r){
+    const v=r.TOTAL_WASTE_PCT||r.wastePercent;
+    const n=parseFloat(v);
+    if(!isNaN(n)&&n>0) return (n<1?(n*100).toFixed(2):n.toFixed(2))+'%';
+    // Calculate if missing
+    const kg=parseFloat(r.TOTAL_WASTE_KG||r.waste||0);
+    const prod=parseFloat(r.productionKg||r.PRODUCTION_KG||0);
+    return (kg>0&&prod>0)?(kg/prod*100).toFixed(2)+'%':'-';
+  }
+  function fPcsWastePct(r){
+    const v=r.TOTAL_PCS_WASTE_PCT||r.PCTTOTAL_PCS_WASTE;
+    const n=parseFloat(v);
+    return (!isNaN(n)&&n>0)?(n<1?(n*100).toFixed(2):n.toFixed(2))+'%':'-';
+  }
+  function fRaw(r,keys){ for(const k of keys){const v=r[k];if(v!==undefined&&v!==null&&v!==''&&v!==0&&v!=='0'){const n=parseFloat(v);if(!isNaN(n)&&n>0)return n.toFixed(2);}} return '-'; }
+  function fRawStr(r,keys){ for(const k of keys){const v=r[k];if(v!==undefined&&v!==null&&v!=='')return String(v);} return '-'; }
+
+  // Summary KPIs
+  const totalPCS = data.reduce((a,r)=>a+(+(r.PRODUCTION_PCS||r.productionPcs||r.production||0)),0);
+  const totalKG  = data.reduce((a,r)=>a+(+(r.productionKg||r.PRODUCTION_KG||0)),0);
+  const totalMTR = data.reduce((a,r)=>a+(+(r.productionMeter||r.PRODUCTION_METER||0)),0);
+  const totalWKG = data.reduce((a,r)=>a+(+(r.TOTAL_WASTE_KG||r.waste||0)),0);
+  const avgEE    = data.length?data.reduce((a,r)=>a+(+(r.ee||r.EE_PCT||0)),0)/data.length:0;
+  const avgOEE   = data.length?data.reduce((a,r)=>a+(+(r.oee||r.OEE_PCT||0)),0)/data.length:0;
+  const kpiStyle = (c)=>`flex:1;border:1px solid var(--border);border-radius:8px;padding:10px 14px;border-top:3px solid ${c};background:var(--bg2)`;
+
+  // Group colors for header bands
+  const GC = {
+    basic:'#22d3ee', prod:'#3fb950', waste:'#f0883e', dt:'#f778ba', mat:'#a371f7'
+  };
+
+  function thG(label,span,color){
+    return `<th colspan="${span}" style="background:${color}22;color:${color};text-align:center;font-size:10px;font-weight:700;letter-spacing:.5px;border-bottom:2px solid ${color};position:sticky;top:0;z-index:3">${label}</th>`;
+  }
+  function th(label){
+    return `<th style="white-space:nowrap;font-size:10px;position:sticky;top:30px;z-index:2;background:var(--bg2)">${label}</th>`;
+  }
+
+  function renderRows(rows){
+    if(!rows.length) return `<tr><td colspan="44" style="text-align:center;color:var(--text3);padding:24px">No data for ${month}</td></tr>`;
+    return rows.map(r=>{
+      const pcs = +(r.PRODUCTION_PCS||r.productionPcs||r.production||0);
+      const isSettingRow = pcs===0;
+      const rowBg = isSettingRow ? 'background:rgba(139,148,158,.04)' : '';
+      const pcsTxt = isSettingRow ? '<span style="color:var(--text3);font-size:10px">'+fJob(r)+'</span>' : `<b style="color:var(--cyan)">${fPCS(r)}</b>`;
+      return `<tr style="cursor:pointer;${rowBg}" onclick="showRecord(${r.id})">
+        <td style="white-space:nowrap;font-size:10px">${fDate(r)}</td>
+        <td style="font-size:10px">${str(r.SHIFT||r.shift)}</td>
+        <td style="white-space:nowrap;font-size:10px;max-width:80px;overflow:hidden;text-overflow:ellipsis" title="${str(r.SHIFT_INCHARGE||r.incharge)}">${str(r.SHIFT_INCHARGE||r.incharge)}</td>
+        <td style="font-size:10px"><span style="padding:1px 5px;border-radius:3px;font-size:9px;background:${(r.SAP_STATUS||r.sapStatus)?'rgba(63,185,80,.15)':'rgba(139,148,158,.1)'};color:${(r.SAP_STATUS||r.sapStatus)?'#3fb950':'#8b949e'}">${str(r.SAP_STATUS||r.sapStatus)}</span></td>
+        <td style="white-space:nowrap;font-size:10px;font-weight:600">${str(r.MACHINE_NO||r.machine)}</td>
+        <td style="font-size:10px">${str(r.SAP_SFG_NO||r.sapSFG)}</td>
+        <td style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${str(r.JOB_NAME||r.job)}">${str(r.JOB_NAME||r.job)}</td>
+        <td style="font-size:10px;text-align:center">${fJob(r)}</td>
+        <td style="font-size:10px;text-align:right">${n0(r.TOTAL_JOB_TIME_MIN||r.totalJobTimeMin)}</td>
+        <td style="font-size:10px;text-align:right">${pcsTxt}</td>
+        <td style="font-size:10px;text-align:right;color:var(--cyan)">${fKG(r)}</td>
+        <td style="font-size:10px;text-align:right">${fMTR(r)}</td>
+        <td style="font-size:10px;text-align:right">${n0(r.PRODUCTION_MIN||r.productionMin||r.PRODUCTION_RUNNING_MIN)}</td>
+        <td style="font-size:10px;text-align:right">${n2(r.AVERAGE_SPEED_MM||r.averageSpeed)}</td>
+        <td style="font-size:10px;text-align:right">${n2(r.RHI||r.rhi)}</td>
+        <td style="font-size:10px;text-align:right;font-weight:600;color:${parseFloat(r.ee||r.EE_PCT)>0.75?'#3fb950':'#f0883e'}">${fEE(r)}</td>
+        <td style="font-size:10px;text-align:right">${fOEE(r)}</td>
+        <td style="font-size:10px;text-align:right">${fRaw(r,['JOB_SETTING_KG'])}</td>
+        <td style="font-size:10px;text-align:right">${fRaw(r,['PROCESS_WASTAGE_KG'])}</td>
+        <td style="font-size:10px;text-align:right">${fRaw(r,['SORTING_WASTE_KG'])}</td>
+        <td style="font-size:10px;text-align:right">${fRaw(r,['PUNCH_WASTE_KG'])}</td>
+        <td style="font-size:10px;text-align:right">${fRaw(r,['TRIM_WASTE_KG'])}</td>
+        <td style="font-size:10px;text-align:right">${fRaw(r,['SLITTING_WASTE_KG'])}</td>
+        <td style="font-size:10px;text-align:right">${fRaw(r,['PRINTING_WASTE_KG'])}</td>
+        <td style="font-size:10px;text-align:right">${fRaw(r,['LAMINATE_WASTE_KG'])}</td>
+        <td style="font-size:10px;text-align:right;font-weight:600;color:#f0883e">${fRaw(r,['TOTAL_WASTE_KG','waste'])}</td>
+        <td style="font-size:10px;text-align:right">${fWastePct(r)}</td>
+        <td style="font-size:10px;text-align:right">${n0(r.WASTAGE_IN_PCS)}</td>
+        <td style="font-size:10px;text-align:right">${fPcsWastePct(r)}</td>
+        <td style="font-size:10px;text-align:right">${fRaw(r,['TECHNICAL_WASTE_KG'])}</td>
+        <td style="font-size:10px;text-align:right">${n0(r.PROCESS_DOWNTIME_MIN)}</td>
+        <td style="font-size:10px;text-align:right">${n0(r.MECHANICAL_DOWNTIME_MIN||r.mechanicalDT)}</td>
+        <td style="font-size:10px;text-align:right">${n0(r.ELECTRICAL_DOWNTIME_MIN||r.electricalDT)}</td>
+        <td style="font-size:10px;text-align:right">${n0(r.UTILITIES_DOWNTIME_MIN||r.utilitiesDT)}</td>
+        <td style="font-size:10px;text-align:right">${n0(r.PREVENTIVE_MAINTENANCE_MIN||r.preventiveDT)}</td>
+        <td style="font-size:10px;text-align:right;font-weight:600;color:#f778ba">${n0(r.TOTAL_TECHNICAL_DOWNTIME_MIN||r.downtime)}</td>
+        <td style="font-size:10px;text-align:right">${n0(r.PLANNING_DOWNTIME_MIN||r.planningDT)}</td>
+        <td style="font-size:10px;text-align:right">${n0(r.UNPLANNED_DOWNTIME_MIN||r.unplannedDT)}</td>
+        <td style="font-size:10px;text-align:right">${fRaw(r,['INPUT_MATERIAL_KG'])}</td>
+        <td style="font-size:10px;text-align:right">${fRaw(r,['ZIPPER_WEIGHT'])}</td>
+        <td style="font-size:10px;text-align:right">${fRaw(r,['SIDE_GUSSET_WEIGHT'])}</td>
+        <td style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${str(r.REMARKS||r.remarks)}">${str(r.REMARKS||r.remarks)}</td>
+        <td><button class="btn btn-outline btn-sm" style="font-size:9px;padding:2px 6px" onclick="event.stopPropagation();showRecord(${r.id})">View</button></td>
+      </tr>`;
+    }).join('');
+  }
+
+  // Filter function for Bag Making
+  window._bmDetailData = data;
+  window._bmDetailDept = 'Bag Making';
+  function applyBMFilter(){
+    const srch=(document.getElementById('bm-search')?.value||'').toLowerCase();
+    const mach=(document.getElementById('bm-machine-filter')?.value||'');
+    const shift=(document.getElementById('bm-shift-filter')?.value||'');
+    const filtered=data.filter(r=>{
+      if(mach&&(r.machine||r.MACHINE_NO)!==mach) return false;
+      if(shift&&(r.shift||r.SHIFT)!==shift) return false;
+      if(srch){
+        const txt=[(r.JOB_NAME||r.job||''),(r.SAP_SFG_NO||r.sapSFG||''),(r.MACHINE_NO||r.machine||''),(r.SHIFT_INCHARGE||r.incharge||'')].join(' ').toLowerCase();
+        if(!txt.includes(srch)) return false;
+      }
+      return true;
+    });
+    const tbody=document.getElementById('bm-detail-tbody');
+    if(tbody) tbody.innerHTML=renderRows(filtered);
+  }
+  window.applyBMFilter=applyBMFilter;
+
+  tc.innerHTML=`
+    <div class="section-header" style="flex-wrap:wrap;gap:8px">
+      <div class="section-title">Bag Making \u2022 Detail Report \u2014 ${month}
+        <span style="font-size:11px;color:var(--text3);font-weight:400;margin-left:8px">${data.length} records</span>
+      </div>
+      <div class="section-actions" style="flex-wrap:wrap;gap:6px">
+        <input type="text" id="bm-search" placeholder="Search job / SFG / incharge\u2026"
+          oninput="applyBMFilter()"
+          style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none;width:220px">
+        <select id="bm-machine-filter" onchange="applyBMFilter()"
+          style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none">
+          <option value="">All Machines</option>${machines.map(m=>`<option value="${m}">${m}</option>`).join('')}
+        </select>
+        <select id="bm-shift-filter" onchange="applyBMFilter()"
+          style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none">
+          <option value="">All Shifts</option><option>A</option><option>B</option><option>C</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px">
+      <div style="${kpiStyle(GC.prod)}"><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Total PCS</div><div style="font-size:18px;font-weight:700;color:var(--cyan)">${Math.round(totalPCS).toLocaleString()}</div></div>
+      <div style="${kpiStyle(GC.prod)}"><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Total KG</div><div style="font-size:18px;font-weight:700;color:var(--green)">${totalKG.toFixed(2)}</div></div>
+      <div style="${kpiStyle(GC.prod)}"><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Total Meter</div><div style="font-size:18px;font-weight:700">${Math.round(totalMTR).toLocaleString()}</div></div>
+      <div style="${kpiStyle(GC.waste)}"><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Total Waste KG</div><div style="font-size:18px;font-weight:700;color:#f0883e">${totalWKG.toFixed(2)}</div></div>
+      <div style="${kpiStyle(GC.basic)}"><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Avg %EE</div><div style="font-size:18px;font-weight:700;color:var(--cyan)">${avgEE<1?(avgEE*100).toFixed(1):avgEE.toFixed(1)}%</div></div>
+      <div style="${kpiStyle(GC.basic)}"><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Avg %OEE</div><div style="font-size:18px;font-weight:700">${avgOEE<1?(avgOEE*100).toFixed(1):avgOEE.toFixed(1)}%</div></div>
+    </div>
+
+    <div class="table-card" style="padding:0">
+      <div style="overflow:auto;max-height:calc(100vh - 310px);border-radius:8px">
+        <table style="border-collapse:separate;border-spacing:0;min-width:2400px">
+          <thead>
+            <tr>
+              ${thG('BASIC INFO',7,GC.basic)}
+              ${thG('PRODUCTION',10,GC.prod)}
+              ${thG('WASTE',13,GC.waste)}
+              ${thG('DOWNTIME',8,GC.dt)}
+              ${thG('MATERIAL',3,GC.mat)}
+              ${thG('REMARKS',1,'#8b949e')}
+              <th style="position:sticky;top:0;z-index:3;background:var(--bg2);font-size:10px"></th>
+            </tr>
+            <tr>
+              ${th('DATE')}${th('SHIFT')}${th('INCHARGE')}${th('SAP STATUS')}${th('MACHINE')}${th('SFG NO')}${th('JOB NAME')}
+              ${th('COUNT OF JOB')}${th('JOB TIME MIN')}${th('PROD PCS')}${th('PROD KG')}${th('PROD MTR')}${th('RUN MIN')}${th('AVG SPD M/M')}${th('RHI')}${th('%EE')}${th('%OEE')}
+              ${th('JOB SET KG')}${th('PROC WASTE')}${th('SORT WASTE')}${th('PUNCH WASTE')}${th('TRIM WASTE')}${th('SLIT WASTE')}${th('PRINT WASTE')}${th('LAM WASTE')}${th('TOTAL WASTE KG')}${th('%TOTAL WASTE')}${th('WASTE PCS')}${th('%PCS WASTE')}${th('TECH WASTE KG')}
+              ${th('PROC DT')}${th('MECH DT')}${th('ELEC DT')}${th('UTIL DT')}${th('PM DT')}${th('TOTAL TECH DT')}${th('PLAN DT')}${th('UNPLAN DT')}
+              ${th('INPUT MAT KG')}${th('ZIPPER WT')}${th('SIDE GUSSET WT')}
+              ${th('REMARKS')}
+              <th style="position:sticky;top:30px;z-index:2;background:var(--bg2)"></th>
+            </tr>
+          </thead>
+          <tbody id="bm-detail-tbody">
+            ${renderRows(data)}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+
 // Wire the early stub to the active override
 if(typeof renderDeptPage === 'function') renderDeptPage._active = renderDeptPage;
 switchDeptTab=function(tab,el,dept){
@@ -8953,26 +9462,32 @@ switchDeptTab=function(tab,el,dept){
     renderDeptDowntimeTab(tc,dept);
   }else if(tab==='wastage'){
     renderDeptWastageTab(tc,dept);
+  }else if(tab==='meeting'){
+    renderDeptDailyMeetingTab(tc,dept);
   }else if(tab==='detail'){
-    const machines=[...new Set(data.map(x=>x.machine).filter(Boolean))];
-    tc.innerHTML=`
-      <div class="section-header">
-        <div class="section-title">${dept} Detail Report - ${FILTER_STATE?.label||APP.currentMonth}</div>
-        <div class="section-actions">
-          <input type="text" id="dept-search" placeholder="Search…" oninput="filterDeptTable('${dept}')"
-            style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none;width:200px">
-          <select id="dept-machine-filter" onchange="filterDeptTable('${dept}')" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none">
-            <option value="">All Machines</option>${machines.map(m=>`<option value="${m}">${m}</option>`).join('')}
-          </select>
-          <select id="dept-shift-filter" onchange="filterDeptTable('${dept}')" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none">
-            <option value="">All Shifts</option><option>A</option><option>B</option><option>C</option>
-          </select>
+    if(dept==='Bag Making'){
+      renderBagMakingDetailReport(tc, data);
+    } else {
+      const machines=[...new Set(data.map(x=>x.machine).filter(Boolean))];
+      tc.innerHTML=`
+        <div class="section-header">
+          <div class="section-title">${dept} Detail Report - ${FILTER_STATE?.label||APP.currentMonth}</div>
+          <div class="section-actions">
+            <input type="text" id="dept-search" placeholder="Search…" oninput="filterDeptTable('${dept}')"
+              style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none;width:200px">
+            <select id="dept-machine-filter" onchange="filterDeptTable('${dept}')" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none">
+              <option value="">All Machines</option>${machines.map(m=>`<option value="${m}">${m}</option>`).join('')}
+            </select>
+            <select id="dept-shift-filter" onchange="filterDeptTable('${dept}')" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none">
+              <option value="">All Shifts</option><option>A</option><option>B</option><option>C</option>
+            </select>
+          </div>
         </div>
-      </div>
-      <div class="table-card"><div style="overflow-x:auto"><table>
-        <thead><tr>${detailHeader(dept)}</tr></thead>
-        <tbody id="dept-tbody">${renderDeptRows(data,dept)}</tbody>
-      </table></div></div>`;
+        <div class="table-card" style="padding:0"><div style="overflow:auto;max-height:calc(100vh - 280px);border-radius:8px"><table style="border-collapse:separate;border-spacing:0">
+          <thead><tr>${detailHeader(dept)}</tr></thead>
+          <tbody id="dept-tbody">${renderDeptRows(data,dept)}</tbody>
+        </table></div></div>`;
+    }
   }
 };
 
@@ -9241,6 +9756,170 @@ function deptDrawMachineCharts(dept,data){
 }
 
 // -- Wastage Tab: machine-wise stacked (Technical + Process) -----------------
+// -- DAILY MEETING TAB (manual-entry, matches OEE/EE daily meeting sheet format) --
+// Formulas (reverse-engineered from the real Lamination sheet):
+//   Available Time = Total Mins − Tech DT
+//   Factor Mins     = Run Mins × 0.75
+//   Average Speed   = Production Meters ÷ Factor Mins
+//   EE%             = Average Speed ÷ Standard Speed
+//   OEE%            = Run Mins ÷ Available Time
+//   Target vs Actual= Production Plan (Kg) − Production KG
+const DM_KEY='up_daily_meeting_v1';
+function _dmLoad(){ try{ return JSON.parse(localStorage.getItem(DM_KEY)||'{}'); }catch(e){ return {}; } }
+function _dmSave(obj){ try{ localStorage.setItem(DM_KEY, JSON.stringify(obj)); }catch(e){} }
+function _dmCalc(row){
+  const totalMins = +row.totalMins||0, techDT = +row.techDT||0, planDT = +row.planDT||0;
+  const runMins   = +row.runMins||0, meters = +row.meters||0, stdSpeed = +row.stdSpeed||0;
+  const prodKg    = +row.prodKg||0, planKg = +row.planKg||0;
+  const availTime = Math.max(totalMins - techDT, 0);
+  const factorMins= runMins * 0.75;
+  const avgSpeed  = factorMins>0 ? (meters/factorMins) : 0;
+  const eePct     = stdSpeed>0 ? (avgSpeed/stdSpeed*100) : 0;
+  const oeePct    = availTime>0 ? (runMins/availTime*100) : 0;
+  const targetVsActual = planKg - prodKg;
+  return {availTime, factorMins, avgSpeed, eePct, oeePct, targetVsActual, planDT};
+}
+function renderDeptDailyMeetingTab(tc, dept){
+  const store = _dmLoad();
+  const monthKey = APP.currentMonth;
+  const dayKeys = Object.keys(store).filter(k=>k.startsWith(monthKey+'_')||store[k].month===monthKey);
+  const rows = dayKeys.map(k=>({key:k, ...store[k]})).sort((a,b)=>(a.date||'')<(b.date||'')?1:-1);
+  const machines = MACHINES_BY_DEPT[dept]||[];
+
+  tc.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-size:16px;font-weight:600;color:var(--cyan)">📊 Daily Meeting — ${dept}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">Manual entry — matches the Daily OEE & EE Details sheet format. EE%, OEE%, Available Time, Factor Mins & Target vs Actual auto-calculate.</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="window.openDailyMeetingForm('${dept}')">+ Add Row</button>
+    </div>
+    <div class="table-card"><div style="overflow-x:auto"><table style="font-size:11px">
+      <thead><tr>
+        <th>Date</th><th>Machine</th><th>Prod. Meters</th><th>Prod. KG</th><th>Total Mins</th>
+        <th>Tech DT</th><th>Plan DT</th><th>Avail. Time</th><th>Run Mins</th><th>Factor Mins</th>
+        <th>Avg Speed</th><th>Std Speed</th><th>EE%</th><th>OEE%</th><th>EE Status</th>
+        <th>Plan (Kg)</th><th>Target vs Actual</th><th>Remarks</th><th>Actions</th>
+      </tr></thead>
+      <tbody>
+        ${rows.length?rows.map(r=>{
+          const c=_dmCalc(r);
+          return `<tr>
+            <td style="white-space:nowrap">${fmtDDMMYYYY(r.date)||r.date||'-'}</td>
+            <td style="font-family:monospace;color:var(--cyan)">${r.machine||'-'}</td>
+            <td>${(+r.meters||0).toLocaleString()}</td>
+            <td>${(+r.prodKg||0).toLocaleString()}</td>
+            <td>${r.totalMins||0}</td>
+            <td style="color:var(--red)">${r.techDT||0}</td>
+            <td style="color:var(--orange)">${r.planDT||0}</td>
+            <td>${c.availTime.toFixed(0)}</td>
+            <td>${r.runMins||0}</td>
+            <td>${c.factorMins.toFixed(2)}</td>
+            <td>${c.avgSpeed.toFixed(2)}</td>
+            <td>${r.stdSpeed||0}</td>
+            <td style="color:${c.eePct>=80?'var(--green)':'var(--yellow)'};font-weight:600">${c.eePct.toFixed(1)}%</td>
+            <td style="color:${c.oeePct>=70?'var(--green)':'var(--yellow)'};font-weight:600">${c.oeePct.toFixed(1)}%</td>
+            <td>${r.eeStatus||'-'}</td>
+            <td>${(+r.planKg||0).toLocaleString()}</td>
+            <td style="color:${c.targetVsActual<=0?'var(--green)':'var(--red)'};font-weight:600">${c.targetVsActual>0?'-':''}${Math.abs(c.targetVsActual).toLocaleString()}</td>
+            <td style="max-width:180px;white-space:normal;font-size:10px;color:var(--text3)">${r.remarks||'-'}</td>
+            <td style="white-space:nowrap">
+              <button class="btn btn-outline btn-sm" onclick="window.openDailyMeetingForm('${dept}','${r.key}')">✏</button>
+              <button class="btn btn-danger btn-sm" onclick="window.deleteDailyMeetingRow('${r.key}','${dept}')">🗑</button>
+            </td>
+          </tr>`;
+        }).join(''):`<tr><td colspan="19" style="text-align:center;color:var(--text3);padding:20px">No entries yet for ${monthKey} — click "+ Add Row" to start logging today's daily meeting data.</td></tr>`}
+      </tbody>
+    </table></div></div>`;
+}
+
+window.openDailyMeetingForm=function(dept, editKey){
+  const store = _dmLoad();
+  const existing = editKey ? store[editKey] : null;
+  const machines = MACHINES_BY_DEPT[dept]||[];
+  const today = new Date().toISOString().slice(0,10);
+  const html=`<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;overflow-y:auto" id="dm-form-overlay">
+    <div style="background:var(--bg2);border-radius:16px;padding:24px;max-width:520px;width:93%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.5)">
+      <h3 style="font-family:'Rajdhani',sans-serif;margin:0 0 14px">📊 ${editKey?'Edit':'Add'} Daily Meeting Row — ${dept}</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group"><label>Date *</label><input type="date" id="dm-date" value="${existing?.date||today}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
+        <div class="form-group"><label>Machine *</label>
+          <select id="dm-machine" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)">
+            ${machines.map(m=>`<option ${existing?.machine===m?'selected':''}>${m}</option>`).join('')}
+          </select></div>
+        <div class="form-group"><label>Production Meters</label><input type="number" id="dm-meters" value="${existing?.meters||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
+        <div class="form-group"><label>Production KG</label><input type="number" id="dm-prodkg" value="${existing?.prodKg||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
+        <div class="form-group"><label>Total Mins</label><input type="number" id="dm-totalmins" value="${existing?.totalMins||1440}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
+        <div class="form-group"><label>Tech DT (Mins)</label><input type="number" id="dm-techdt" value="${existing?.techDT||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
+        <div class="form-group"><label>Plan DT (Mins)</label><input type="number" id="dm-plandt" value="${existing?.planDT||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
+        <div class="form-group"><label>Run Mins</label><input type="number" id="dm-runmins" value="${existing?.runMins||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
+        <div class="form-group"><label>Standard Speed</label><input type="number" id="dm-stdspeed" value="${existing?.stdSpeed||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
+        <div class="form-group"><label>EE Status</label><input type="text" id="dm-eestatus" value="${existing?.eeStatus||''}" placeholder="e.g. OK, Low, Machine Down" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
+        <div class="form-group"><label>Production Plan (Kg)</label><input type="number" id="dm-plankg" value="${existing?.planKg||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
+      </div>
+      <div class="form-group" style="margin-top:10px"><label>Remarks</label><textarea id="dm-remarks" rows="2" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);resize:vertical">${existing?.remarks||''}</textarea></div>
+      <div id="dm-live-calc" style="margin-top:10px;font-size:11px;color:var(--text3);background:var(--bg3);border-radius:8px;padding:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn btn-primary" onclick="window.saveDailyMeetingRow('${dept}','${editKey||''}')">💾 Save</button>
+        <button class="btn btn-outline" onclick="document.getElementById('dm-form-overlay').remove()">Cancel</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  const updateLive=()=>{
+    const c=_dmCalc({
+      totalMins:document.getElementById('dm-totalmins').value, techDT:document.getElementById('dm-techdt').value,
+      planDT:document.getElementById('dm-plandt').value, runMins:document.getElementById('dm-runmins').value,
+      meters:document.getElementById('dm-meters').value, stdSpeed:document.getElementById('dm-stdspeed').value,
+      prodKg:document.getElementById('dm-prodkg').value, planKg:document.getElementById('dm-plankg').value
+    });
+    document.getElementById('dm-live-calc').innerHTML =
+      `Available Time: <b>${c.availTime.toFixed(0)}</b> min &nbsp;|&nbsp; Factor Mins: <b>${c.factorMins.toFixed(2)}</b> &nbsp;|&nbsp; `+
+      `Avg Speed: <b>${c.avgSpeed.toFixed(2)}</b> &nbsp;|&nbsp; EE%: <b>${c.eePct.toFixed(1)}%</b> &nbsp;|&nbsp; OEE%: <b>${c.oeePct.toFixed(1)}%</b> &nbsp;|&nbsp; Target vs Actual: <b>${c.targetVsActual}</b>`;
+  };
+  ['dm-totalmins','dm-techdt','dm-plandt','dm-runmins','dm-meters','dm-stdspeed','dm-prodkg','dm-plankg'].forEach(id=>{
+    document.getElementById(id).addEventListener('input', updateLive);
+  });
+  updateLive();
+};
+
+window.saveDailyMeetingRow=function(dept, editKey){
+  const date = document.getElementById('dm-date').value;
+  const machine = document.getElementById('dm-machine').value;
+  if(!date||!machine){ toast('Date and Machine are required','error'); return; }
+  const store = _dmLoad();
+  const key = editKey || (date+'_'+machine.replace(/\s+/g,''));
+  const month = (function(){ const d=new Date(date); return d.toLocaleString('en',{month:'short'})+'-'+String(d.getFullYear()).slice(2); })();
+  store[key] = {
+    date, machine, dept, month,
+    meters:+document.getElementById('dm-meters').value||0,
+    prodKg:+document.getElementById('dm-prodkg').value||0,
+    totalMins:+document.getElementById('dm-totalmins').value||0,
+    techDT:+document.getElementById('dm-techdt').value||0,
+    planDT:+document.getElementById('dm-plandt').value||0,
+    runMins:+document.getElementById('dm-runmins').value||0,
+    stdSpeed:+document.getElementById('dm-stdspeed').value||0,
+    eeStatus:document.getElementById('dm-eestatus').value||'',
+    planKg:+document.getElementById('dm-plankg').value||0,
+    remarks:document.getElementById('dm-remarks').value||''
+  };
+  _dmSave(store);
+  document.getElementById('dm-form-overlay').remove();
+  toast('✅ Daily meeting row saved','success');
+  const tc=document.getElementById('dept-tab-content');
+  if(tc) renderDeptDailyMeetingTab(tc, dept);
+};
+
+window.deleteDailyMeetingRow=function(key, dept){
+  if(!confirm('Delete this row?')) return;
+  const store = _dmLoad();
+  delete store[key];
+  _dmSave(store);
+  toast('Row deleted','success');
+  const tc=document.getElementById('dept-tab-content');
+  if(tc) renderDeptDailyMeetingTab(tc, dept);
+};
+
 function renderDeptWastageTab(tc,dept){
   const data=getMonthData(dept);
   const machines=machineAgg(dept,data);
@@ -10371,7 +11050,7 @@ showConnectionStatus=function(){
 };
 loadFromSheets=syncAllSheets;
 const __saveScriptUrlOperational=saveScriptUrl;
-saveScriptUrl=function(){ const el=document.getElementById('set-appScriptUrl'); if(el) APP.settings.appScriptUrl=el.value.trim()||ERP_SHEET_CONFIG.APP_SCRIPT_URL; localStorage.setItem('up_appScriptUrl',APP.settings.appScriptUrl); toast('Apps Script URL saved','success'); debugLog('ok','Apps Script URL saved',APP.settings.appScriptUrl); };
+saveScriptUrl=function(){ if(!APP.currentUser||APP.currentUser.role!=='MAIN_ADMIN'){ toast('⛔ Only MAIN_ADMIN can change Apps Script URL','error'); return; } const el=document.getElementById('set-appScriptUrl'); if(el) APP.settings.appScriptUrl=el.value.trim()||ERP_SHEET_CONFIG.APP_SCRIPT_URL; localStorage.setItem('up_appScriptUrl',APP.settings.appScriptUrl); toast('Apps Script URL saved','success'); debugLog('ok','Apps Script URL saved',APP.settings.appScriptUrl); };
 const __renderSettingsSheetsOperational=renderSettingsSheets;
 renderSettingsSheets=function(){
   const c=document.getElementById('settings-panel');
@@ -10381,7 +11060,11 @@ renderSettingsSheets=function(){
 const __renderSettingsScriptOperational=renderSettingsScript;
 renderSettingsScript=function(){
   const c=document.getElementById('settings-panel'); APP.settings.appScriptUrl=APP.settings.appScriptUrl||ERP_SHEET_CONFIG.APP_SCRIPT_URL;
-  c.innerHTML=`<h3 style="font-family:'Rajdhani',sans-serif;margin-bottom:16px">Apps Script Web App</h3><div class="alert alert-info">This endpoint is used for every source sheet. Your deployed Apps Script must support <b>action=ping</b> and <b>action=read</b>.</div>${sField('Apps Script URL','appScriptUrl',APP.settings.appScriptUrl)}<div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-primary" onclick="saveScriptUrl()">Save</button><button class="btn btn-outline" onclick="testConnection()">Ping</button><button class="btn btn-outline" onclick="syncAllSheets()">Sync All</button></div>`;
+  const isAdmin = APP.currentUser && APP.currentUser.role === 'MAIN_ADMIN';
+  const urlDisplay = APP.settings.appScriptUrl ? `<div style="padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:monospace;color:var(--text2);word-break:break-all">${APP.settings.appScriptUrl}</div>` : `<div style="padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--text3)">Not configured</div>`;
+  const urlEdit = isAdmin ? sField('Apps Script URL','appScriptUrl',APP.settings.appScriptUrl) : `<div style="margin-bottom:8px"><label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Apps Script URL</label>${urlDisplay}<div style="font-size:10px;color:var(--text3);margin-top:4px">🔒 Only MAIN_ADMIN can change this setting</div></div>`;
+  const saveBtn = isAdmin ? `<button class="btn btn-primary" onclick="saveScriptUrl()">Save</button>` : '';
+  c.innerHTML=`<h3 style="font-family:'Rajdhani',sans-serif;margin-bottom:16px">Apps Script Web App</h3><div class="alert alert-info">This endpoint is used for every source sheet. Your deployed Apps Script must support <b>action=ping</b> and <b>action=read</b>.</div>${urlEdit}<div style="display:flex;gap:8px;margin-top:16px">${saveBtn}<button class="btn btn-outline" onclick="testConnection()">Ping</button><button class="btn btn-outline" onclick="syncAllSheets()">Sync All</button></div>`;
 };
 const __doLoginOperational=doLogin;
 doLogin=function(){ __doLoginOperational(); if(APP.currentUser){ APP.settings.appScriptUrl=localStorage.getItem('up_appScriptUrl')||ERP_SHEET_CONFIG.APP_SCRIPT_URL; debugLog('info','Logged in - click Sync Now for live data',APP.currentUser.username); /* UPC: auto syncAllSheets removed */ } };
@@ -10950,7 +11633,28 @@ if(false && key==='PRODUCTION_MASTER'){ // removed - data from INCHARGE sheets
       if(!APP.inkData || !APP.inkData.length) APP.inkData=allRows.filter(r=>r.__SOURCE_TAB==='INK_IMPORT').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.PRODUCTION_DATE||r.DATE)}));
       if(!APP.ncrData || !APP.ncrData.length) APP.ncrData=allRows.filter(r=>r.__SOURCE_TAB==='QUALITY_IMPORT').map(r=>Object.assign({},r,{month:r.MONTH||upDateToMonthKey(r.NCR_DATE||r.DATE)}));
     }
-    if(key==='WIP') APP.wipData=allRows;
+    if(key==='WIP'){
+      APP.wipData=allRows;
+      // Cache WIP data and update sync time
+      try{
+        localStorage.setItem('upc_wip_v2', JSON.stringify(allRows));
+        localStorage.setItem('upc_wip_sync_time', new Date().toISOString());
+      }catch(e){}
+      // Re-render WIP page if user is currently on it
+      setTimeout(function(){
+        try{
+          const wipEl = document.getElementById('wip-erp-sync-time');
+          if(wipEl){
+            const _n=new Date();
+            wipEl.textContent=('0'+_n.getDate()).slice(-2)+'-'+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][_n.getMonth()]+'-'+_n.getFullYear()+' '+('0'+_n.getHours()).slice(-2)+':'+('0'+_n.getMinutes()).slice(-2);
+          }
+          // Re-render wip page if active
+          if(APP.currentPage==='wip' && typeof renderWIP==='function'){
+            renderWIP(document.getElementById('main-content'));
+          }
+        }catch(e){}
+      }, 100);
+    }
     if(key==='MASTER_DATA') APP.materialData=allRows;
     if(key==='PLANNING') APP.planningData=allRows;
     setSourceStatus(key,'OK',allRows.length);
@@ -11143,24 +11847,54 @@ syncOneSource = async function(key){
       debugLog(users.length?'ok':'err','PASSWORD_MASTER user load',`${users.length} active user(s) parsed. Expected users include main_admin, director, manager, usman, ejaz, slitting, bagmaking, quality.`);
       return users;
     }
-    // WIP / PLANNING / MASTER_DATA - read directly via sheetId (not INCHARGE, not SYSTEM_MASTER)
+    // WIP / PLANNING / MASTER_DATA — read via readsheet action through Apps Script
+    // Uses erpApi() which routes via APP.settings.appScriptUrl (the deployed Apps Script URL)
+    // Apps Script doGet action=readsheet: reads any sheetId+tab+headerRow directly ✓
     if(key==='WIP' || key==='MASTER_DATA' || key==='PLANNING'){
       const _sheetId = cfg.sourceSheetId;
       const _tab     = cfg.sourceTabName;
       const _hdr     = key==='MASTER_DATA' ? 4 : 5;
-      const _u = new URL('https://up-erp-fcm.admin-upco.workers.dev');
-      _u.searchParams.set('action','readsheet');
-      _u.searchParams.set('sheetId', _sheetId);
-      _u.searchParams.set('tab', _tab);
-      _u.searchParams.set('headerRow', _hdr);
-      _u.searchParams.set('_', Date.now());
+      // Try 1: erpApi (routes to Apps Script via APP.settings.appScriptUrl)
+      let _fetched = false;
       try{
-        const _res  = await fetch(_u.toString(), {cache:'no-store', redirect:'follow'});
-        const _json = await _res.json();
-        allRows = (_json.ok && Array.isArray(_json.rows)) ? _json.rows : [];
-        debugLog(allRows.length?'ok':'warn', cfg.sourceSheetName+'/'+_tab, allRows.length+' rows');
+        const _json = await erpApi({
+          action:'readsheet', sheetId:_sheetId, tab:_tab, headerRow:_hdr
+        });
+        if(_json && _json.ok && Array.isArray(_json.rows) && _json.rows.length){
+          allRows = _json.rows;
+          _fetched = true;
+          debugLog('ok', cfg.sourceSheetName+'/'+_tab+' via erpApi', allRows.length+' rows');
+        } else {
+          debugLog('warn', cfg.sourceSheetName+'/'+_tab+' erpApi empty', JSON.stringify(_json).slice(0,80));
+        }
       }catch(e){
-        debugLog('err', cfg.sourceSheetName+' fetch failed', e.message);
+        debugLog('warn', cfg.sourceSheetName+' erpApi failed', e.message);
+      }
+      // Try 2: Direct Apps Script URL fallback (if erpApi failed or returned empty)
+      if(!_fetched){
+        const _scriptUrl = APP?.settings?.appScriptUrl || ERP_SHEET_CONFIG?.APP_SCRIPT_URL || '';
+        if(_scriptUrl){
+          try{
+            const _u = new URL(_scriptUrl);
+            _u.searchParams.set('action','readsheet');
+            _u.searchParams.set('sheetId', _sheetId);
+            _u.searchParams.set('tab', _tab);
+            _u.searchParams.set('headerRow', String(_hdr));
+            _u.searchParams.set('_', String(Date.now()));
+            const _res  = await fetch(_u.toString(), {cache:'no-store', redirect:'follow'});
+            const _json = await _res.json();
+            if(_json && _json.ok && Array.isArray(_json.rows)){
+              allRows = _json.rows;
+              debugLog('ok', cfg.sourceSheetName+'/'+_tab+' via direct URL', allRows.length+' rows');
+            } else {
+              debugLog('warn', cfg.sourceSheetName+' direct URL empty', JSON.stringify(_json).slice(0,80));
+            }
+          }catch(e){
+            debugLog('err', cfg.sourceSheetName+' all fetch attempts failed', e.message);
+          }
+        } else {
+          debugLog('warn', cfg.sourceSheetName, 'No Apps Script URL configured — go to Settings → App Script');
+        }
       }
     } else {
     for(const tab of tabs){
@@ -11393,6 +12127,10 @@ async function sseFetchDept(dept, fromDate){
   u.searchParams.set('action', 'read');
   u.searchParams.set('dept', dept === 'ALL' ? 'ALL' : dept);
   if(fromDate) u.searchParams.set('fromDate', fromDate);
+  // Force the backend to bypass its cache and read straight from the sheet —
+  // this is a user-initiated sync (Sync Now / smart-sync), so it should always
+  // reflect the latest data, not whatever the automated hourly trigger cached.
+  u.searchParams.set('forceRefresh', '1');
   u.searchParams.set('_', Date.now());
   const res  = await fetch(u.toString(), {cache:'no-store', redirect:'follow'});
   const text = await res.text();
@@ -11411,6 +12149,7 @@ function sseApplyRows(rows){
   const ncr   = rows.filter(r=>String(r.__DEPT||'')==='QUALITY');
   const disp  = rows.filter(r=>String(r.__DEPT||'')==='DISPATCH');
   const fg    = rows.filter(r=>String(r.__DEPT||'')==='FG');
+  const wip   = rows.filter(r=>String(r.__DEPT||'')==='WIP');
 
   // Which production depts are present in this fetch?
   const fetchedProdDepts = new Set(prod.map(r=>String(r.__DEPT||'').toUpperCase()));
@@ -11441,6 +12180,9 @@ function sseApplyRows(rows){
     if(window.upDispatch && typeof window.upDispatch.setData==='function') window.upDispatch.setData(APP.dispatchData);
   }
   if(fg.length) APP.fgData = fg;
+  // WIP — always replace entirely with fresh fetch (no partial-keep logic
+  // needed since WIP is typically a single small tab, not multi-dept like production)
+  if(wip.length) APP.wipData = wip;
 }
 
 // Show sync popup
@@ -11576,8 +12318,18 @@ async function syncNowClick(){
       await syncAllSheets({silent:true, keepPage:page});
     } else if(dept){
       // Single dept sync
-      const rows = await sseFetchDept(dept, fromDate);
-      sseApplyRows(rows);
+      // WIP uses a different sheet (WIP_MATERIAL_MASTER, not INCHARGE_SHEETS)
+      // so it cannot use sseFetchDept (action=read&dept=WIP fails on Apps Script)
+      // Instead call syncOneSource which uses action=readsheet with the correct sheetId
+      if(dept === 'WIP'){
+        const wipRows = await syncOneSource('WIP');
+        // syncOneSource('WIP') already sets APP.wipData and saves cache
+        // Just re-render the page with fresh data
+        debugLog('ok','WIP sync complete', (wipRows||[]).length+' rows');
+      } else {
+        const rows = await sseFetchDept(dept, fromDate);
+        sseApplyRows(rows);
+      }
     } else {
       // Fallback
       const rows = await sseFetchDept('ALL', fromDate);
@@ -13500,12 +14252,27 @@ navigate = (function(orig){
       </div>
       ${verifyHtml}
       <div class="stats-row" style="flex-wrap:wrap">
-        <div class="stat-box"><div class="label">Last Cache Time</div><div class="value" style="font-size:17px">${escapeHtml(latest&&latest.savedAt?new Date(latest.savedAt).toLocaleTimeString():'Not available')}</div><div class="sub">${escapeHtml((latest&&latest.reason)||'No successful cache yet')}</div></div>
-        <div class="stat-box"><div class="label">Last Cache Date</div><div class="value" style="font-size:17px">${escapeHtml(latest&&latest.savedAt?new Date(latest.savedAt).toLocaleDateString():'Not available')}</div><div class="sub">Date this snapshot was saved</div></div>
-        <div class="stat-box"><div class="label">Saved Cache Slots</div><div class="value">${d.slots.length} / ${CACHE_LIMIT}</div><div class="sub">Same hour is updated, not duplicated</div></div>
-        <div class="stat-box"><div class="label">Rows in Latest Cache</div><div class="value">${d.latestRows.toLocaleString()}</div><div class="sub">Latest size: ${escapeHtml(d.latestSize)}</div></div>
-        <div class="stat-box"><div class="label">LocalStorage Test</div><div class="value" style="color:${d.storage.ok?'var(--green)':'var(--red)'}">${d.storage.ok?'WORKING':'FAILED'}</div><div class="sub">${escapeHtml(d.storage.message)}</div></div>
+        <div class="stat-box" style="border-top:3px solid var(--cyan)"><div class="label">Current Time</div><div class="value" style="font-size:17px;color:var(--cyan)" id="cache-live-clock">--:--:--</div><div class="sub" id="cache-live-date">Loading…</div></div>
+        <div class="stat-box"><div class="label">Last Cache Time</div><div class="value" style="font-size:17px">${escapeHtml(latest&&latest.savedAt?new Date(latest.savedAt).toLocaleTimeString('en-PK',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true}):'Not available')}</div><div class="sub">${escapeHtml((latest&&latest.reason)||'No successful cache yet')}</div></div>
+        <div class="stat-box"><div class="label">Last Cache Date</div><div class="value" style="font-size:15px">${escapeHtml(latest&&latest.savedAt?new Date(latest.savedAt).toLocaleDateString('en-PK',{day:'2-digit',month:'short',year:'numeric'}):'Not available')}</div><div class="sub">Date this snapshot was saved</div></div>
+        <div class="stat-box"><div class="label">Cache Age</div><div class="value" style="font-size:17px" id="cache-age-val">${latest&&latest.savedAt?(function(){const d=Math.floor((Date.now()-new Date(latest.savedAt))/60000);return d<1?'Just now':d<60?d+'m ago':Math.floor(d/60)+'h '+d%60+'m ago';})():'N/A'}</div><div class="sub">How old is the cached data</div></div>
+        <div class="stat-box"><div class="label">Cache Slots</div><div class="value">${d.slots.length} / ${CACHE_LIMIT}</div><div class="sub">Rows: ${d.latestRows.toLocaleString()} · ${escapeHtml(d.latestSize)}</div></div>
+        <div class="stat-box"><div class="label">LocalStorage</div><div class="value" style="color:${d.storage.ok?'var(--green)':'var(--red)'}">${d.storage.ok?'✅ WORKING':'❌ FAILED'}</div><div class="sub">${escapeHtml(d.storage.message)}</div></div>
       </div>
+      <script>
+        (function(){
+          var _cct=document.getElementById('cache-live-clock');
+          var _ccd=document.getElementById('cache-live-date');
+          function _tick(){
+            if(!_cct||!_cct.isConnected){return;}
+            var n=new Date();
+            _cct.textContent=n.toLocaleTimeString('en-PK',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
+            if(_ccd) _ccd.textContent=n.toLocaleDateString('en-PK',{weekday:'short',day:'2-digit',month:'short',year:'numeric'});
+            setTimeout(_tick,1000);
+          }
+          _tick();
+        })();
+      <\/script>
       <div class="chart-card" style="margin-bottom:16px">
         <div class="chart-header"><div><div class="chart-title">Built-in Cache Verification</div><div class="chart-subtitle">Runs a browser-storage test and confirms that a real ERP cache can be generated.</div></div></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -14311,7 +15078,9 @@ console.log('[UP ERP V25] Detail report fix applied - renderDeptRows direct repl
     var cards = document.querySelectorAll('.kpi-card');
     for(var i=0; i<cards.length; i++){
       var lbl = cards[i].querySelector('.kpi-label');
-      if(lbl && lbl.textContent.toLowerCase().indexOf('bag') >= 0){
+      // Exact match only — must NOT touch "Bag Dispatch" card
+      var lblTxt = lbl ? lbl.textContent.trim().toLowerCase() : '';
+      if(lbl && lblTxt.startsWith('bag making') && !lblTxt.includes('dispatch')){
         var valEl = cards[i].querySelector('.kpi-value');
         if(valEl) valEl.textContent = formatBagPcs(pcs);
         var tgtEl = cards[i].querySelector('.kpi-target');
@@ -14759,6 +15528,7 @@ console.log('[UP ERP V25] Detail report fix applied - renderDeptRows direct repl
     { key:'jobname',  label:'JOB NAME',      syn:['JOB NAME','JOB DESC','JOB DESCRIPTION'] },
     { key:'kg',       label:'DISPATCHED (KG)', syn:['DISPATCHED (KG)','DISPATCHED KG','DISPATCH KG','DISPATCHED','QTY KG','QUANTITY KG','KG'] },
     { key:'rolls',    label:'ROLLS/BAGS',    syn:['ROLLS/BAGS','ROLLS BAGS','ROLLSBAGS','ROLLS','BAGS','NO OF ROLLS'] },
+    { key:'bagqty',   label:'BAG_QTY',       syn:['BAG_QTY','BAG QTY','BAGQTY'] },
     { key:'pcsmtr',   label:'PCS/MTR',       syn:['PCS/MTR','PCS MTR','PCSMTR','PCS MTRS','PCS','MTR','METERS','PIECES'] },
     { key:'veh',      label:'VEH./BILTY NO.', syn:['VEH./BILTY NO.','VEH BILTY NO','VEHBILTY_NO','VEHICLE NO','BILTY NO','VEH NO'] },
     { key:'plant',    label:'PLANT/TYPE',    syn:['PLANT/TYPE','PLANT TYPE','PLANTTYPE','PLANT','TYPE'] }
@@ -15116,12 +15886,12 @@ console.log('[UP ERP V25] Detail report fix applied - renderDeptRows direct repl
       return emptyState('Could not load dispatch data: ' + state.error, true);
     }
 
-    // Bag Dispatch — rows where JOB_TYPE contains "BAG", Column L (ROLLS/BAGS) summed
+    // Bag Dispatch — Dispatch Master Column Q (BAG_QTY), direct sum.
+    // Read from cells.bagqty (survives normalizeRows()) — raw r.BAG_QTY never
+    // reaches this scope since filteredRows()/APP.upDispatchData only keeps
+    // pre-defined COLUMNS fields, not arbitrary raw sheet columns.
     var bagDispatchTotal = rows.reduce(function(a,r){
-      var jt = String(r['JOB_TYPE']||r['JOBTYPE']||r['JOB TYPE']||'').trim().toUpperCase();
-      if(jt.indexOf('BAG')===-1) return a;
-      var v = r.ROLLSBAGS!==undefined?r.ROLLSBAGS:(r['ROLLS/BAGS']!==undefined?r['ROLLS/BAGS']:r['ROLLS_BAGS']);
-      var num = parseFloat(String(v||'').replace(/,/g,''));
+      var num = parseFloat(String((r.cells&&r.cells.bagqty)||'').replace(/,/g,''));
       return a + (isNaN(num)?0:num);
     }, 0);
 
@@ -15717,7 +16487,43 @@ console.log('[UP ERP V25] Detail report fix applied - renderDeptRows direct repl
     }catch(e){}
   }
 
-  function patchAll(){ patchDispatchKPICards(); patchDispatchTrendChart(); }
+  function patchBagDispatchCard(){
+    // Patch "Bag Dispatch" KPI card on dashboard using upDispatch normalized data.
+    // This runs AFTER the template already rendered bagPouchDispatchedKg so the
+    // card is always up-to-date even if APP.upDispatchData loaded late.
+    if(typeof APP === 'undefined' || APP.currentPage !== 'dashboard') return;
+    var H = helpers();
+    var normRows = (H && typeof H.hasData === 'function' && H.hasData())
+      ? (Array.isArray(APP.upDispatchData) ? APP.upDispatchData : [])
+      : [];
+    var mKey = APP.currentMonth || '';
+    var monthRows = normRows.filter(function(r){ return r._month === mKey; });
+    var total = 0;
+    if(monthRows.length){
+      total = monthRows.reduce(function(a,r){
+        var num = parseFloat(String((r.cells && r.cells.bagqty) || '').replace(/,/g,''));
+        return a + (isNaN(num) ? 0 : num);
+      }, 0);
+    } else if(Array.isArray(APP.dispatchData)){
+      // Fallback: raw dispatchData
+      APP.dispatchData.forEach(function(r){
+        var qty = r.BAG_QTY || r['BAG QTY'] || r.BAGQTY || 0;
+        var num = parseFloat(String(qty).replace(/,/g,''));
+        if(!isNaN(num)) total += num;
+      });
+    }
+    var cards = document.querySelectorAll('.kpi-card');
+    for(var i=0; i<cards.length; i++){
+      var lbl = cards[i].querySelector('.kpi-label');
+      if(lbl && lbl.textContent.trim() === 'Bag Dispatch'){
+        var valEl = cards[i].querySelector('.kpi-value');
+        if(valEl) valEl.textContent = Math.round(total).toLocaleString();
+        break;
+      }
+    }
+  }
+
+  function patchAll(){ patchDispatchKPICards(); patchDispatchTrendChart(); patchBagDispatchCard(); }
 
   // Same additive hook pattern already used by patchBagCard(): wrap
   // navigate() and syncAllSheets(), run after the original render/sync.
@@ -16707,30 +17513,18 @@ function renderMaintSubmit(){
             <input type="hidden" id="mr-reqby" value="${_uName}">
           </div>
 
-          <!-- Accord Waste -->
+          <!-- Waste -->
           <div class="form-group">
-            <label>Accord Waste (KG)</label>
+            <label>Waste (KG)</label>
             <input type="number" id="mr-accord-waste" placeholder="0" min="0" step="0.1"
               style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:13px;width:100%">
           </div>
 
-          <!-- Image - camera + gallery + remove -->
-          <div class="form-group" style="grid-column:1/-1">
-            <label>Attach Image (optional)</label>
-            <div style="display:flex;gap:8px;margin-bottom:6px">
-              <label style="flex:1;cursor:pointer">
-                <div class="btn btn-outline btn-sm" style="text-align:center;width:100%">📷 Camera</div>
-                <input type="file" id="mr-image-cam" accept="image/*" capture="environment" style="display:none">
-              </label>
-              <label style="flex:1;cursor:pointer">
-                <div class="btn btn-outline btn-sm" style="text-align:center;width:100%">🖼 Gallery / File</div>
-                <input type="file" id="mr-image-file" accept="image/*" style="display:none">
-              </label>
-            </div>
-            <div id="mr-image-preview" style="display:none;position:relative">
-              <img id="mr-image-thumb" style="max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border)">
-              <button onclick="window._clearMaintImage()" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px;line-height:1">×</button>
-            </div>
+          <!-- Image inputs hidden - camera/gallery removed per requirements -->
+          <div style="display:none">
+            <input type="file" id="mr-image-cam" accept="image/*" capture="environment" style="display:none">
+            <input type="file" id="mr-image-file" accept="image/*" style="display:none">
+            <div id="mr-image-preview"><img id="mr-image-thumb"></div>
           </div>
 
         </div>
@@ -16870,13 +17664,20 @@ window.submitMaintRequest=async function(){
     if(typeof window.sendBrowserNotif==='function')
       window.sendBrowserNotif('🔧 New Request ['+priority+']',dept+' / '+type+': '+desc.substring(0,60),'mr-'+id);
     // Switch to "All Requests" tab reliably
-    if(typeof window.switchMaintTab === 'function'){
-      const allTabEl = Array.from(document.querySelectorAll('#maint-tabs .tab'))
-        .find(t => (t.getAttribute('onclick')||'').includes("switchMaintTab('requests'"));
-      window.switchMaintTab('requests', allTabEl);
-    } else {
-      renderMaintRequests();
-    }
+    // Navigate to All Requests tab after successful submit
+    setTimeout(function(){
+      if(typeof window.switchMaintTab === 'function'){
+        const allTabEl = Array.from(document.querySelectorAll('#maint-tabs .tab'))
+          .find(t => (t.getAttribute('onclick')||'').includes("switchMaintTab('requests'"));
+        if(allTabEl){
+          document.querySelectorAll('#maint-tabs .tab').forEach(t=>t.classList.remove('active'));
+          allTabEl.classList.add('active');
+        }
+        window.switchMaintTab('requests', allTabEl||null);
+      } else {
+        renderMaintRequests();
+      }
+    }, 50);
   }catch(e){
     // Save locally so data isn't lost
     APP.maintenanceRequests.push(row); cacheReqs(); updateBadge();
@@ -16987,10 +17788,10 @@ function renderMaintQueue(_resetFilter){
       ${isTech()?'New maintenance requests of your type will appear here.':
         isIncharge()?'Completed requests needing your sign-off will appear here.':
         'When technical team accepts your request, come back here to log the downtime details.'}</div>`:`
-    <div class="table-card"><div style="overflow-x:auto"><table>
+    <div class="table-card" style="padding:0"><div style="overflow:auto;max-height:calc(100vh - 260px)"><table style="border-collapse:separate;border-spacing:0">
       <thead><tr>
-        <th>Notif No</th><th>Date</th><th>Time</th><th>Dept</th><th>Machine</th>
-        <th>Type</th><th>Priority</th><th>Status</th><th>Description</th><th>Actions</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Notif No</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Date</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Time</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Dept</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Machine</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Type</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Priority</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Status</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Description</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Actions</th>
       </tr></thead>
       <tbody>
         ${mine.map(r=>`<tr style="cursor:pointer" onclick="window.openMaintDetail('${g(r,'id')}')">
@@ -17068,12 +17869,12 @@ function renderMaintRequests(){
       ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="window.exportMaintCSV()">⬇ CSV</button>`:''}
       ${isAdmin()?`<button id="maint-delete-all-btn" class="btn btn-danger btn-sm" onclick="window.deleteAllMaintRequests()" title="Permanently delete ALL maintenance requests — use once before going live to clear test data">🗑️ Clear All Test Data</button>`:''}
     </div>
-    <div class="table-card"><div style="overflow-x:auto"><table>
+    <div class="table-card" style="padding:0"><div style="overflow:auto;max-height:calc(100vh - 220px)"><table style="border-collapse:separate;border-spacing:0">
       <thead><tr>
-        <th>Notif No</th><th>Date</th><th>Time</th><th>Dept</th><th>Machine</th><th>Type</th>
-        <th>Priority</th><th>Status</th><th>Description</th><th>Requested By</th>
-        <th>Incharge</th><th>Arrival</th><th>Closing</th><th>DT(min)</th>
-        <th>Waste KG</th><th>Action Taken</th><th>Root Cause</th><th>Parts Used</th><th>Actions</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Notif No</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Date</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Time</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Dept</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Machine</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Type</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Priority</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Status</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Description</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Requested By</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Incharge</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Arrival</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Closing</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">DT(min)</th>
+        <th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Waste KG</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Action Taken</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Root Cause</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Parts Used</th><th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Actions</th>
       </tr></thead>
       <tbody id="maint-tbody"></tbody>
     </table></div></div>`;
@@ -17903,7 +18704,7 @@ window.deleteMaint=async function(id){
 // live). MAIN_ADMIN only. Requires typing an exact confirmation phrase — this
 // is destructive and cannot be undone, so a simple OK/Cancel isn't enough.
 window.deleteAllMaintRequests=async function(){
-  if(!isAdmin()){ toast('Only Main Admin can do this','error'); return; }
+  if(!APP.currentUser||APP.currentUser.role!=='MAIN_ADMIN'){ toast('⛔ Only MAIN_ADMIN can clear test data','error'); return; }
   const count = (APP.maintenanceRequests||[]).length;
   if(!count){ toast('No requests to delete','info'); return; }
   const typed = prompt('This will permanently delete ALL '+count+' maintenance request(s) — including any real/live data.\n\nType DELETE ALL to confirm:');
@@ -18061,9 +18862,8 @@ window.savePMSchedule=async function(){
   };
 
   try{
-    await apiPost('writeInchargeRow',{dept:'PM_SCHEDULE_DEPT',row}).catch(()=>{});
-    // Fallback: store via maintenanceSubmit-style generic write if dedicated endpoint absent
-    await apiPost('maintenanceSubmit',{tab:TAB_PM_SCHED,row}).catch(()=>{});
+    // Single write: maintenanceSubmit only (writeInchargeRow removed — caused duplicates)
+    await apiPost('maintenanceSubmit',{tab:TAB_PM_SCHED,row});
     APP.pmSchedule = APP.pmSchedule||[];
     APP.pmSchedule.push(row);
     try{ localStorage.setItem(PMS_KEY, JSON.stringify(APP.pmSchedule)); }catch(e){}
@@ -19416,34 +20216,13 @@ function renderFGBody(body, rows){
   const byCustomer = {};
   customers.forEach(c=>{ byCustomer[c] = rows.filter(r=>r.customer===c); });
 
-  // Bag Dispatch — from Dispatch Master (current month), rows where JOB_TYPE
-  // contains "BAG", Column L (ROLLS/BAGS) summed. Shown here too since FG/Dispatch
-  // are closely related tabs and this metric is relevant to both.
-  const _fgBagDispatch = (function(){
-    const monthNow = APP.currentMonth;
-    const dRows = (APP.dispatchData||[]).filter(r=>{
-      const raw = r.PRODUCTION_DATE||r.date||r.DISPATCH_DATE||r.DATE||'';
-      try{ const d=new Date(raw); if(isNaN(d)) return false;
-        return d.toLocaleString('en',{month:'short'})+'-'+String(d.getFullYear()).slice(2) === monthNow;
-      }catch(e){ return false; }
-    });
-    return dRows.reduce((a,r)=>{
-      const jt = String(r['JOB_TYPE']||r['JOBTYPE']||r['JOB TYPE']||'').trim().toUpperCase();
-      if(!jt.includes('BAG')) return a;
-      const v = r.ROLLSBAGS!==undefined?r.ROLLSBAGS:(r['ROLLS/BAGS']!==undefined?r['ROLLS/BAGS']:r['ROLLS_BAGS']);
-      const num=parseFloat(String(v||'').replace(/,/g,''));
-      return a+(isNaN(num)?0:num);
-    },0);
-  })();
-
   body.innerHTML=`
     <!-- -- KPI CARDS ------------------------------------ -->
-    <div class="kpi-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px">
+    <div class="kpi-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
       ${fgKPI('cyan','📦','Total FG Stock', totalKg.toLocaleString('en-PK',{maximumFractionDigits:2})+' KG', 'All customers combined')}
       ${fgKPI('green','🏢','Customers', customers.length, 'With FG stock')}
       ${fgKPI('purple','🔖','Total Materials', materials, 'Distinct material codes')}
       ${fgKPI('orange','📍','Storage Locations', locations.length, locations.slice(0,3).join(', ')+(locations.length>3?'…':''))}
-      ${fgKPI('pink','🛍','Bag Dispatch', Math.round(_fgBagDispatch).toLocaleString(), 'This month · Job Type = BAG')}
     </div>
 
     <!-- -- SEARCH + FILTER ----------------------------- -->
@@ -19991,6 +20770,17 @@ function upcPostSync(){
   upcRebuildDerived();
   upcSave('sync-now');
   upcPushToModules();
+  // Immediately update WIP sync time indicator if WIP data was loaded
+  try{
+    if(Array.isArray(APP.wipData) && APP.wipData.length){
+      try{ localStorage.setItem('upc_wip_sync_time', new Date().toISOString()); }catch(e){}
+      var wipEl = document.getElementById('wip-erp-sync-time');
+      if(wipEl){
+        var _dn = new Date();
+        wipEl.textContent = ('0'+_dn.getDate()).slice(-2)+'-'+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][_dn.getMonth()]+'-'+_dn.getFullYear()+' '+('0'+_dn.getHours()).slice(-2)+':'+('0'+_dn.getMinutes()).slice(-2);
+      }
+    }
+  }catch(e){}
   // Re-render current page with fresh data
   setTimeout(function(){
     try{
