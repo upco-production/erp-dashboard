@@ -691,6 +691,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <div class="nav-item" onclick="navigate('jobtracker')">
           <div class="nav-icon">📋</div><span class="nav-text">Job Progress Tracker</span>
         </div>
+        <div class="nav-item" onclick="navigate('wipsum')" id="nav-wipsum-item">
+          <div class="nav-icon">📦</div><span class="nav-text">WIP Summary</span>
+        </div>
       </div>
       <div class="nav-group">
         <div class="nav-label">DATA & REPORTS</div>
@@ -1348,8 +1351,13 @@ function navigate(page) {
   // Close mobile sidebar when navigating
   if(isMobile()) closeMobileSidebar();
   document.querySelectorAll('.nav-item').forEach(el=>{
-    const txt = el.querySelector('.nav-text');
-    if(txt) el.classList.toggle('active', txt.textContent.toLowerCase().replace(/[^a-z]/g,'')=== page.toLowerCase());
+    const oc = el.getAttribute('onclick')||'';
+    const mp = oc.match(/navigate\('([^']+)'\)/);
+    if(mp) el.classList.toggle('active', mp[1] === page);
+    else{
+      const txt = el.querySelector('.nav-text');
+      if(txt) el.classList.toggle('active', txt.textContent.toLowerCase().replace(/[^a-z]/g,'')=== page.toLowerCase());
+    }
   });
   
   // Destroy chart instances
@@ -1361,7 +1369,7 @@ function navigate(page) {
     dashboard:'Dashboard Overview',ink:'Ink & Solvent',printing:'Printing Department',lamination:'Lamination Department',
     slitting:'Slitting Department',bagmaking:'Bag Making Department',quality:'Quality / NCR',
     wastage:'Wastage & Ink Center',effcenter:'Efficiency Center',downtime:'Downtime Center',
-    wip:'WIP Material',jobtracker:'Job Progress Tracker',alldata:'All Data',reports:'Reports',
+    wip:'WIP Material',jobtracker:'Job Progress Tracker',wipsum:'WIP Summary',alldata:'All Data',reports:'Reports',
     importexport:'Import / Export',settings:'Settings',dispatch:'Dispatch & FG',
     maintenance:'Maintenance',cache:'Cache Status'
   };
@@ -1381,6 +1389,24 @@ function navigate(page) {
     case 'maintenance': if(typeof renderMaintenance==='function') renderMaintenance(content); break;
     case 'wip': renderWIP(content); break;
     case 'jobtracker': renderJobTracker(content); break;
+    case 'wipsum':
+      // Always fetch fresh WIP data when opening WIP Summary
+      if(typeof renderWIPSummary === 'function') renderWIPSummary(content);
+      else if(typeof window.renderWIPSummary === 'function') window.renderWIPSummary(content);
+      // Trigger background sync immediately - bypasses localStorage cache
+      setTimeout(async function(){
+        try{
+          // Clear stale localStorage WIP cache
+          try{ localStorage.removeItem('upc_wip_v2'); }catch(e){}
+          // Sync Planning + WIP fresh from sheets
+          await window.syncOneSource('PLANNING');
+          await window.syncWIPMaster({silent:true, btnId:null});
+          // Re-render with fresh data
+          if(APP.currentPage==='wipsum' && typeof renderWIPSummary==='function')
+            renderWIPSummary(document.getElementById('main-content'));
+        }catch(e){ debugLog('warn','wipsum auto-sync failed',e.message); }
+      }, 50);
+      break;
     case 'alldata': renderAllData(content); break;
     case 'reports': renderReports(content); break;
     case 'importexport': renderImportExport(content); break;
@@ -3759,267 +3785,590 @@ function filterWIPStatus(){
 // =============================================
 // WIP MATERIAL
 // Feature 6: WIP calculations fully functional - all quantities derived from live sheet fields
-function getWIPEnhancedRows(){
-  const base=(APP.wipData&&APP.wipData.length?APP.wipData:[]);
-  const prod=(APP.productionData&&APP.productionData.length?APP.productionData:[]);
-  const stages=['Printing','Lamination','Slitting','Bag Making','Dispatch'];
-  const customers=['Nestle Pakistan','Engro Foods','Unilever','Pepsi Cola','Colgate-Palmolive','P&G Pakistan','Reckitt Benckiser','HUL Pakistan'];
-  const structures=['Pouch Job','Three Layer Lamination','Four Layer Foil Structure','Standup Pouch','Central Seal Bag'];
-  const compsByStructure={
-    'Pouch Job':['Front Panel','Back Panel','Side Gusset','Zipper'],
-    'Three Layer Lamination':['Printed PET','MPET','PE'],
-    'Four Layer Foil Structure':['Printed PET','MPET','FOIL','PE'],
-    'Standup Pouch':['Front Panel','Back Panel','Bottom Gusset','Zipper'],
-    'Central Seal Bag':['Printed Web','Laminate Web']
-  };
-  // Helper: safely resolve a numeric field from multiple possible column names
-  function resolveNum(r, keys, fallback) {
-    // Feature 6: resolve numbers from exact keys, normalized keys, and spaced header variants.
-    const normalizeKey = (s)=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
-    const normMap = {};
-    Object.keys(r||{}).forEach(k=>{ normMap[normalizeKey(k)] = r[k]; });
-    for (const k of keys) {
-      const candidates = [k, String(k).replace(/_/g,' '), String(k).toLowerCase(), String(k).toUpperCase()];
-      for (const ck of candidates) {
-        const v = r ? r[ck] : undefined;
-        if (v !== undefined && v !== null && String(v).trim() !== '' && !isNaN(Number(String(v).replace(/,/g,'')))) return Number(String(v).replace(/,/g,''));
-      }
-      const nv = normMap[normalizeKey(k)];
-      if (nv !== undefined && nv !== null && String(nv).trim() !== '' && !isNaN(Number(String(nv).replace(/,/g,'')))) return Number(String(nv).replace(/,/g,''));
-    }
-    return fallback;
-  }
-  const jobs=[];
-  base.forEach((w,i)=>{
-    // Feature 6: resolve all WIP stage quantities from live field names
-    // WIP_ORDER_LINK column names (actual sheet): PRINTING_BALANCE_KG, LAMINATION_BALANCE_KG, SLITTING_BALANCE_KG
-    // Also support STAGE_BALANCE derived fields and legacy field names
-    const printedWIP    = resolveNum(w, ['PRINTING_BALANCE_KG','PRINTING_BALANCE','PRINTED_WIP','PRINTED_QTY','PRINT_WIP','PRINTING_WIP','PRINTING_QTY','PRINTED_KG','PRINT_QTY','WIP_PRINTING','printBalance','printedWIP'], 0);
-    const laminatedWIP  = resolveNum(w, ['LAMINATION_BALANCE_KG','LAMINATION_BALANCE','LAMINATED_WIP','LAMINATED_QTY','LAM_WIP','LAMINATION_WIP','LAMINATION_QTY','LAMINATED_KG','LAM_QTY','WIP_LAMINATION','lamBalance','laminatedWIP'], 0);
-    const slittedWIP    = resolveNum(w, ['SLITTING_BALANCE_KG','SLITTING_BALANCE','SLITTED_WIP','SLITTED_QTY','SLIT_WIP','SLITTING_WIP','SLITTING_QTY','SLITTED_KG','SLIT_QTY','WIP_SLITTING','slitBalance','slittedWIP'], 0);
-    const bagMakingWIP  = resolveNum(w, ['SLITTING_USED_BY_BAG_KG','BAG_MAKING_BALANCE_KG','BAG_MAKING_WIP','BAG_WIP','BAG_MAKING_QTY','BAGMAKING_WIP','BAG_QTY','BAG_MAKING_KG','BAG_MAKING_PCS','WIP_BAG_MAKING','bagBalance','bagMakingWIP'], 0);
-    const orderQty      = resolveNum(w, ['ORDER_QTY_KG','ORDER_QTY','ORDER_QUANTITY','PLANNED_QTY','PO_QTY','ORDER_KG','ORDER_PCS','TOTAL_ORDER_QTY','orderQty'], 0);
-    const producedQty   = resolveNum(w, ['DELIVERED_QTY_KG','PRODUCED_QTY','PRODUCED_QUANTITY','COMPLETED_QTY','TOTAL_PRODUCED_QTY','PRODUCTION_QTY','PRODUCTION_KG','PRODUCTION_PCS','producedQty'], 0);
+// ═══════════════════════════════════════════════════════
+// WIP MODULE — Rebuilt v2.0
+// Data source: WIP_ORDER_LINK (normWIPRow field mapping)
+// No fake fallback data — shows empty state when no sync
+// syncWIPMaster() = dedicated clean sync function
+// ═══════════════════════════════════════════════════════
 
-    // Derive currentQty: highest stage that has material
-    let qty = bagMakingWIP || slittedWIP || laminatedWIP || printedWIP || 0;
+// ── Sync WIP from sheet ──────────────────────────────────────────────────────
+window.syncWIPMaster = async function(opts){
+  opts = opts || {};
+  const showToast = opts.silent !== true;
+  const btnId     = opts.btnId || 'wip-sync-btn';
+  const btn       = document.getElementById(btnId);
+  if(btn){ btn.disabled=true; btn.innerHTML='<span style="animation:spin 1s linear infinite;display:inline-block">⟳</span> Fetching…'; }
+  if(showToast) toast('Fetching WIP data from WIP_ORDER_LINK…','info');
 
-    // Determine current stage from data or from which WIP field is populated
-    let currentStage = w.CURRENT_STAGE || w.currentStage || w.STAGE || w.stage || w.currentStage || '';
-    if (!currentStage) {
-      if (bagMakingWIP > 0) currentStage = 'Bag Making';
-      else if (slittedWIP > 0) currentStage = 'Slitting';
-      else if (laminatedWIP > 0) currentStage = 'Lamination';
-      else if (printedWIP > 0) currentStage = 'Printing';
-      else currentStage = stages[i % 4];
+  try{
+    // Architecture note:
+    // WIP_MATERIAL_MASTER has its own Apps Script (syncWipMaster) that:
+    //   Reads PLANNING_ORDER_MASTER + INCHARGE sheets → computes WIP → writes WIP_ORDER_LINK
+    // This runs hourly via trigger in WIP_MATERIAL_MASTER spreadsheet.
+    // UP ERP reads the already-computed WIP_ORDER_LINK via readsheet action.
+    // The ERP CANNOT directly trigger WIP_MATERIAL_MASTER's script (different project).
+
+    const scriptUrl = (APP&&APP.settings&&APP.settings.appScriptUrl) || ERP_SHEET_CONFIG.APP_SCRIPT_URL || '';
+    if(!scriptUrl){
+      throw new Error('Apps Script URL not configured — go to Settings → App Script');
     }
 
-    const status = w.ORDER_STATUS || w.STATUS || w.status || w.JOB_STATUS || w.jobStatus || 'IN PROGRESS';
-    const qualityStatus = w.QUALITY_STATUS || w.qualityStatus || w.QC_STATUS || (status==='Hold'?'HOLD':(i%9===0?'REWORK':(i%13===0?'REJECT':'PASS')));
-    const structure = w.PRODUCT_STRUCTURE || w.productStructure || w.STRUCTURE || structures[i%structures.length];
+    let rows = [];
+    const WIP_SHEET_ID  = '142hTGmzg9CyeL-aQTzaF6JIy7WCRNvXHe6p4LPk_a6k';
+    const WIP_TAB       = 'WIP_ORDER_LINK';
+    const WIP_HDR_ROW   = 5;
 
-    // Feature 6: balance and ageing calculations from live fields
-    const resolvedOrderQty   = orderQty   || (qty + 900 + i*130);
-    const resolvedProducedQty = producedQty || Math.max(slittedWIP || laminatedWIP || printedWIP || Math.round((qty||100)*0.55), 0);
-    const balanceQty  = Math.max(resolvedOrderQty - resolvedProducedQty, 0);
-    const ageingDays  = resolveNum(w, ['AGEING_DAYS','AGEING','AGING','AGE_DAYS','WIP_AGEING','WIP_AGING','ageingDays'], (i*3+2)%38);
-    const plannedDate = w.PLANNED_DISPATCH_DATE || w.plannedDispatchDate || ('2026-04-'+String((i%24)+4).padStart(2,'0'));
-    const actualDate  = (status==='Completed')
-      ? (w.ACTUAL_DISPATCH_DATE || w.actualDispatchDate || '2026-04-'+String((i%24)+5).padStart(2,'0'))
-      : '-';
+    // PRIMARY: call Apps Script DIRECTLY (bypasses Cloudflare proxy cache)
+    // Uses the actual deployed Apps Script URL from Settings
+    const directUrl = localStorage.getItem('up_appScriptUrl') ||
+                      (APP&&APP.settings&&APP.settings.appScriptUrl) || '';
+    if(directUrl && directUrl.includes('script.google.com')){
+      try{
+        const u = new URL(directUrl);
+        u.searchParams.set('action','readsheet');
+        u.searchParams.set('sheetId', WIP_SHEET_ID);
+        u.searchParams.set('tab', WIP_TAB);
+        u.searchParams.set('headerRow', String(WIP_HDR_ROW));
+        u.searchParams.set('_', String(Date.now())); // cache-bust Cloudflare/browser cache
+        const res  = await fetch(u.toString(), {cache:'no-store', redirect:'follow'});
+        const json = await res.json();
+        if(json && json.ok && Array.isArray(json.rows) && json.rows.length){
+          rows = json.rows;
+          debugLog('ok','syncWIPMaster direct Apps Script', rows.length+' rows');
+        }
+      }catch(e){ debugLog('warn','syncWIPMaster direct URL failed',e.message); }
+    }
 
-    jobs.push({
-      id: i+1,
-      jobNo:    w.JOB_NAME || w.job || w.JOB_NO || w.jobNo || ('JOB-'+String(1000+i)),
-      sapPO:    w.ORDER || w.SAP_PO   || w.sapPO   || w.PO      || ('PO-'+String(10000+i)),
-      sapSFG:   w.MATERIAL || w.SAP_SFG_NO || w.SAP_SFG || w.sapSFG || ('SFG-'+String(5000+i)),
-      customer: w.CUSTOMER || w.customer || customers[i%customers.length],
-      productStructure: structure,
-      orderQty: resolvedOrderQty,
-      producedQty: resolvedProducedQty,
-      balanceQty,
-      currentQty: qty || resolvedProducedQty,
-      currentStage, jobStatus: status, qualityStatus, ageingDays,
-      plannedDispatchDate: plannedDate,
-      actualDispatchDate:  actualDate,
-      readyForDispatch: currentStage==='Dispatch' || status==='Completed',
-      delayed: ageingDays > 15,
-      printedWIP, laminatedWIP, slittedWIP, bagMakingWIP,
-      components:[]
-    });
-  });
-  if(!jobs.length){
-    // Live-only ERP: do not create demo/fallback WIP rows.
-    // When Google Sheet WIP data is empty or not loaded, the WIP tables show "No WIP job found".
-    return [];
+    // FALLBACK 1: erpApi via Cloudflare proxy
+    if(!rows.length){
+      try{
+        const res = await erpApi({
+          action   : 'readsheet',
+          sheetId  : WIP_SHEET_ID,
+          tab      : WIP_TAB,
+          headerRow: WIP_HDR_ROW
+        });
+        if(res && res.ok && Array.isArray(res.rows) && res.rows.length){
+          rows = res.rows;
+          debugLog('ok','syncWIPMaster via erpApi', rows.length+' rows');
+        }
+      }catch(e){ debugLog('warn','syncWIPMaster erpApi failed',e.message); }
+    }
+
+    // FALLBACK 2: Cloudflare worker URL directly
+    if(!rows.length){
+      try{
+        const u = new URL(scriptUrl);
+        u.searchParams.set('action','readsheet');
+        u.searchParams.set('sheetId', WIP_SHEET_ID);
+        u.searchParams.set('tab', WIP_TAB);
+        u.searchParams.set('headerRow', String(WIP_HDR_ROW));
+        u.searchParams.set('_', String(Date.now()));
+        const res  = await fetch(u.toString(), {cache:'no-store', redirect:'follow'});
+        const json = await res.json();
+        if(json && json.ok && Array.isArray(json.rows) && json.rows.length){
+          rows = json.rows;
+          debugLog('ok','syncWIPMaster via proxy fallback', rows.length+' rows');
+        }
+      }catch(e){ debugLog('warn','syncWIPMaster proxy fallback failed',e.message); }
+    }
+
+    if(!rows.length){
+      throw new Error('All WIP fetch attempts failed — check Apps Script URL in Settings');
+    }
+
+    // Store in APP and localStorage
+    APP.wipData = rows;
+    try{
+      localStorage.setItem('upc_wip_v2', JSON.stringify(rows));
+      localStorage.setItem('upc_wip_sync_time', new Date().toISOString());
+    }catch(e){}
+
+    // Update sync time badge
+    _wipUpdateSyncBadge();
+
+    // Re-render the page
+    if(APP.currentPage === 'wip'){
+      renderWIP(document.getElementById('main-content'));
+    }
+
+    // Extract sheet's LAST_UPDATED from rows
+    const lastUpdatedRaw = rows.length ? (rows[rows.length-1].LAST_UPDATED || rows[0].LAST_UPDATED || '') : '';
+    let sheetTime = '';
+    if(lastUpdatedRaw){
+      try{
+        const d=new Date(lastUpdatedRaw);
+        if(!isNaN(d)) sheetTime = ' · Sheet: '+('0'+d.getDate()).slice(-2)+'-'+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+      }catch(e){}
+    }
+    if(showToast) toast('✅ WIP loaded — '+rows.length+' orders'+sheetTime,'success');
+    return rows;
+
+  }catch(e){
+    debugLog('err','syncWIPMaster failed', e.message);
+    if(showToast) toast('❌ WIP sync failed: '+e.message,'error');
+    throw e;
+  }finally{
+    if(btn){ btn.disabled=false; btn.innerHTML='🔄 Sync WIP'; }
   }
-  jobs.forEach((j,idx)=>{
-    const names=compsByStructure[j.productStructure]||['Component A','Component B'];
-    j.components=names.map((name,c)=>{
-      const cStage=stages[Math.min(stages.indexOf(j.currentStage)+(c%2===0?0:-1),3)]||j.currentStage;
-      const produced=Math.max(Math.round(j.producedQty/(names.length||1) - c*28),0);
-      const pending=Math.max(Math.round(j.orderQty/(names.length||1)-produced),0);
-      return {componentName:name,currentStage:cStage,producedQty:produced,pendingQty:pending,qualityStatus:(c===names.length-1&&j.qualityStatus==='HOLD')?'HOLD':'PASS',ageingDays:Math.max(j.ageingDays-c*2,0),location:cStage+' Area',machine:['RG01','RG02','SS-01','COMEXI','SM-01','BG-01'][c%6],status:pending>0?'Pending':'Ready'};
-    });
-  });
-  return jobs;
+};
+
+function _wipUpdateSyncBadge(){
+  try{
+    const el = document.getElementById('wip-sync-badge');
+    if(!el) return;
+    const t = localStorage.getItem('upc_wip_sync_time');
+    if(!t){ el.textContent='Not synced'; el.style.color='var(--text3)'; return; }
+    const d = new Date(t);
+    const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const ago = Math.round((Date.now()-d)/60000);
+    const timeStr = ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+    el.textContent = ago < 1 ? 'Just now' : ago < 60 ? ago+'m ago · '+timeStr : Math.floor(ago/60)+'h ago · '+timeStr;
+    el.style.color = ago < 10 ? 'var(--green)' : ago < 60 ? 'var(--cyan)' : 'var(--orange)';
+  }catch(e){}
 }
 
+// ── Stage badge ──────────────────────────────────────────────────────────────
+function wipStageBadge(stage){
+  const map={
+    'PRINTING'  :['#22d3ee','#0e7490'],
+    'LAMINATION':['#a78bfa','#6d28d9'],
+    'SLITTING'  :['#34d399','#065f46'],
+    'BAG MAKING':['#fb923c','#c2410c'],
+    'BAG_MAKING':['#fb923c','#c2410c'],
+    'DISPATCH'  :['#f472b6','#be185d'],
+    'IN FG'     :['#4ade80','#166534'],
+    'COMPLETED' :['#6b7280','#374151'],
+  };
+  const k=(stage||'').toUpperCase().replace(/_/g,' ').trim();
+  const [fg,bg]=map[k]||['#94a3b8','#1e293b'];
+  return `<span style="padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;background:${bg}22;color:${fg};border:1px solid ${fg}44">${stage||'–'}</span>`;
+}
+function wipStatusBadge(status){
+  const u=(status||'').toUpperCase().trim();
+  const map={'IN PROGRESS':['var(--green)','ok'],'IN PROGESS':['var(--green)','ok'],'COMPLETED':['#6b7280','done'],'ON HOLD':['var(--orange)','hold'],'CANCELLED':['var(--red)','cancel']};
+  const [color]=map[u]||['var(--text3)'];
+  return `<span style="color:${color};font-size:10px;font-weight:600">${status||'–'}</span>`;
+}
+function wipBadge(val){
+  if(!val) return '<span style="color:var(--text3)">–</span>';
+  const u=String(val).toUpperCase();
+  const colorMap={
+    'PRINTING':'#22d3ee','LAMINATION':'#a78bfa','SLITTING':'#34d399',
+    'BAG MAKING':'#fb923c','BAG_MAKING':'#fb923c','DISPATCH':'#f472b6',
+    'PASS':'#4ade80','HOLD':'#f87171','REWORK':'#fb923c','REJECT':'#ef4444',
+    'IN PROGRESS':'#4ade80','COMPLETED':'#6b7280','ON HOLD':'#fb923c',
+  };
+  const c=colorMap[u]||'#94a3b8';
+  return `<span style="padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600;background:${c}22;color:${c}">${val}</span>`;
+}
+
+// ── Filter ───────────────────────────────────────────────────────────────────
 function filterWIPDashboard(){
-  const q=normKey(document.getElementById('wip-global-search')?.value||'');
-  const stage=document.getElementById('wip-stage-filter')?.value||'';
-  const quality=document.getElementById('wip-quality-filter')?.value||'';
-  let jobs=getWIPEnhancedRows().filter(j=>{
-    const match=!q||[j.sapPO,j.sapSFG,j.jobNo,j.customer,j.productStructure].some(v=>normKey(v).includes(q));
-    if(!match) return false;
-    if(stage && j.currentStage!==stage) return false;
-    if(quality && j.qualityStatus!==quality) return false;
+  const q  = (document.getElementById('wip-global-search')?.value||'').toLowerCase().replace(/[\s_-]/g,'');
+  const st = document.getElementById('wip-stage-filter')?.value||'';
+  const qs = document.getElementById('wip-status-filter')?.value||'';
+  const raw = (APP.wipData||[]).map(normWIPRow).filter(r=>r.order&&r.order!=='0');
+  const filtered = raw.filter(r=>{
+    if(st){
+      const cs=(r.currentStage||'').toUpperCase();
+      if(!cs.includes(st.toUpperCase())) return false;
+    }
+    if(qs){
+      const ss=(r.status||'').toUpperCase();
+      if(!ss.includes(qs.toUpperCase())) return false;
+    }
+    if(q){
+      const hay=[r.order,r.material,r.matDesc,r.status,r.currentStage].join(' ')
+                .toLowerCase().replace(/[\s_-]/g,'');
+      if(!hay.includes(q)) return false;
+    }
     return true;
   });
-  const wrap=document.getElementById('wip-job-master-wrap');
-  const info=document.getElementById('wip-search-info');
-  if(info) info.textContent=`${jobs.length} jobs found`;
-  if(wrap) wrap.innerHTML=wipJobMasterTable(jobs);
+  const tbody = document.getElementById('wip-table-body');
+  if(tbody) tbody.innerHTML = _wipTableRows(filtered);
+  const info = document.getElementById('wip-search-info');
+  if(info) info.textContent = filtered.length+' / '+raw.length+' orders';
 }
 
-function wipBadge(v){
-  const s=String(v||'').toUpperCase();
-  const cls=s.includes('HOLD')||s.includes('DELAY')?'badge-red':s.includes('REWORK')?'badge-yellow':s.includes('READY')||s.includes('PASS')||s.includes('COMPLETE')?'badge-green':'badge-blue';
-  return `<span class="badge ${cls}">${safeText(v)}</span>`;
+// ── Table rows ───────────────────────────────────────────────────────────────
+function _wipTableRows(rows){
+  if(!rows.length) return `<tr><td colspan="13" style="text-align:center;padding:28px;color:var(--text3)">No WIP orders found matching the filter.</td></tr>`;
+  return rows.map((r,i)=>{
+    const bg = i%2===0 ? '' : 'background:rgba(255,255,255,.015)';
+    const kgFmt = v => v>0 ? (v>=1000?(v/1000).toFixed(2)+' T':v.toFixed(1)+' kg') : '–';
+    const pct   = r.orderQty>0 ? Math.min(100,Math.round(r.deliveredQty/r.orderQty*100)) : 0;
+    const barColor = pct>=100?'var(--green)':pct>=60?'var(--cyan)':'var(--orange)';
+    const progressBar = `<div style="height:4px;background:var(--border);border-radius:2px;margin-top:3px;min-width:60px">
+      <div style="height:4px;width:${pct}%;background:${barColor};border-radius:2px"></div>
+    </div>`;
+    return `<tr style="cursor:pointer;${bg}" onclick="wipOpenDetail(${i},'${encodeURIComponent(r.order)}')">
+      <td style="font-size:10px;font-family:monospace;font-weight:600;color:var(--cyan)">${r.order||'–'}</td>
+      <td style="font-size:10px;font-family:monospace">${r.material||'–'}</td>
+      <td style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.matDesc}">${r.matDesc||'–'}</td>
+      <td style="font-size:10px;text-align:right">${kgFmt(r.orderQty)}</td>
+      <td style="font-size:10px;text-align:right">${kgFmt(r.deliveredQty)}${progressBar}</td>
+      <td style="font-size:10px;text-align:right;color:#22d3ee">${kgFmt(r.printBalance)}</td>
+      <td style="font-size:10px;text-align:right;color:#a78bfa">${kgFmt(r.lamBalance)}</td>
+      <td style="font-size:10px;text-align:right;color:#34d399">${kgFmt(r.slitBalance)}</td>
+      <td style="font-size:10px;text-align:right;color:#fb923c">${kgFmt(r.bagBalance)}</td>
+      <td style="font-size:10px;text-align:right;font-weight:600">${kgFmt(r.totalWIP)}</td>
+      <td style="font-size:10px">${wipStageBadge(r.currentStage)}</td>
+      <td style="font-size:10px">${wipStatusBadge(r.status)}</td>
+      <td style="font-size:10px"><button class="btn btn-outline btn-sm" style="font-size:9px;padding:2px 7px"
+        onclick="event.stopPropagation();wipOpenDetail(${i},'${encodeURIComponent(r.order)}')">Detail</button></td>
+    </tr>`;
+  }).join('');
 }
 
-function wipJobMasterTable(jobs){
-  return `<div class="table-card"><div class="table-header"><div class="table-title">Job Master View</div><div style="font-size:11px;color:var(--text2)">Click a job for department drill-down</div></div>
-  <div style="overflow-x:auto"><table><thead><tr><th>Job Number</th><th>SAP Code</th><th>SFG Code</th><th>Customer</th><th>Product Structure</th><th>Order Qty</th><th>Produced Qty</th><th>Balance Qty</th><th>Current Stage</th><th>Quality</th><th>Ageing</th><th>Planned Dispatch</th><th>Actual Dispatch</th><th>Action</th></tr></thead><tbody>
-  ${jobs.map(j=>`<tr><td style="font-weight:600;color:var(--cyan)">${safeText(j.jobNo)}</td><td style="font-family:monospace;font-size:11px">${safeText(j.sapPO)}</td><td style="font-family:monospace;font-size:11px">${safeText(j.sapSFG)}</td><td>${safeText(j.customer)}</td><td>${safeText(j.productStructure)}</td><td>${Number(j.orderQty).toLocaleString()}</td><td>${Number(j.producedQty).toLocaleString()}</td><td>${Number(j.balanceQty).toLocaleString()}</td><td>${wipBadge(j.currentStage)}</td><td>${wipBadge(j.qualityStatus)}</td><td>${j.ageingDays} days</td><td>${safeText(j.plannedDispatchDate)}</td><td>${safeText(j.actualDispatchDate)}</td><td><button class="btn btn-primary btn-sm" onclick="openWIPJob('${encodeURIComponent(j.sapPO)}')">Open</button></td></tr>`).join('') || `<tr><td colspan="14" style="text-align:center;color:var(--text2);padding:18px">No WIP job found.</td></tr>`}
-  </tbody></table></div></div>`;
-}
+// ── Detail panel ─────────────────────────────────────────────────────────────
+function wipOpenDetail(idx, orderEnc){
+  const order = decodeURIComponent(orderEnc);
+  const raw   = (APP.wipData||[]).map(normWIPRow).filter(r=>r.order&&r.order!=='0');
+  const r     = raw[idx] || raw.find(x=>x.order===order);
+  if(!r) return;
+  const panel = document.getElementById('wip-detail-panel');
+  if(!panel) return;
 
-function openWIPJob(sapEnc){
-  const sap=decodeURIComponent(sapEnc);
-  const j=getWIPEnhancedRows().find(x=>x.sapPO===sap);
-  const holder=document.getElementById('wip-drilldown');
-  if(!j||!holder) return;
-  const deptRows=['Printing','Lamination','Slitting','Bag Making','Dispatch'].map((d,i)=>({dept:d,qty: i===0?j.printedWIP:i===1?j.laminatedWIP:i===2?j.slittedWIP:i===3?j.bagMakingWIP:j.readyForDispatch?j.balanceQty:0,jobsWaiting:d===j.currentStage?1:0,avgAge:Math.max(j.ageingDays-i*3,0),status:d===j.currentStage?'Current':(i<['Printing','Lamination','Slitting','Bag Making','Dispatch'].indexOf(j.currentStage)?'Completed':'Pending')}));
-  holder.innerHTML=`<div class="section-header"><div class="section-title">Job Analysis: ${safeText(j.jobNo)} <span style="color:var(--text2);font-size:12px">${safeText(j.sapPO)} / ${safeText(j.sapSFG)}</span></div><button class="btn btn-outline btn-sm" onclick="document.getElementById('wip-drilldown').innerHTML=''">Close</button></div>
-  <div class="kpi-grid"><div class="kpi-card cyan"><div class="kpi-value">${safeText(j.currentStage)}</div><div class="kpi-label">Current Stage</div></div><div class="kpi-card green"><div class="kpi-value">${Number(j.currentQty).toLocaleString()}</div><div class="kpi-label">Current Quantity</div></div><div class="kpi-card orange"><div class="kpi-value">${j.ageingDays}</div><div class="kpi-label">Ageing Days</div></div><div class="kpi-card red"><div class="kpi-value">${safeText(j.qualityStatus)}</div><div class="kpi-label">Quality Status</div></div></div>
-  <div class="table-card"><div class="table-header"><div class="table-title">Component Management</div><div style="font-size:11px;color:var(--text2)">${safeText(j.productStructure)}</div></div><div style="overflow-x:auto"><table><thead><tr><th>Component Name</th><th>Current Stage</th><th>Produced Qty</th><th>Pending Qty</th><th>Quality Status</th><th>Ageing Days</th><th>Location</th></tr></thead><tbody>${j.components.map(c=>`<tr><td>${safeText(c.componentName)}</td><td>${wipBadge(c.currentStage)}</td><td>${Number(c.producedQty).toLocaleString()}</td><td>${Number(c.pendingQty).toLocaleString()}</td><td>${wipBadge(c.qualityStatus)}</td><td>${c.ageingDays}</td><td>${safeText(c.location)}</td></tr>`).join('')}</tbody></table></div></div>
-  <div class="table-card"><div class="table-header"><div class="table-title">Department Level Drill Down</div><div style="font-size:11px;color:var(--text2)">Click department to show row-wise data</div></div><div style="overflow-x:auto"><table><thead><tr><th>Department</th><th>Quantity Waiting</th><th>Jobs Waiting</th><th>Average Waiting Days</th><th>Status</th><th>Action</th></tr></thead><tbody>${deptRows.map(r=>`<tr><td><span class="dept-dot" style="background:${deptColor(r.dept)}"></span>${r.dept}</td><td>${Number(r.qty||0).toLocaleString()}</td><td>${r.jobsWaiting}</td><td>${r.avgAge}</td><td>${wipBadge(r.status)}</td><td><button class="btn btn-primary btn-sm" onclick="openWIPDept('${sapEnc}','${encodeURIComponent(r.dept)}')">View Rows</button></td></tr>`).join('')}</tbody></table></div></div>`;
-}
+  const kgFmt = v => v>0 ? (v>=1000?(v/1000).toFixed(3)+' T':v.toFixed(2)+' kg') : '–';
+  const stages = [
+    {label:'Printing',   val:r.printBalance, color:'#22d3ee'},
+    {label:'Lamination', val:r.lamBalance,   color:'#a78bfa'},
+    {label:'Slitting',   val:r.slitBalance,  color:'#34d399'},
+    {label:'Bag Making', val:r.bagBalance,   color:'#fb923c'},
+  ];
+  const total = r.totalWIP || stages.reduce((a,s)=>a+s.val,0);
+  const maxVal = Math.max(...stages.map(s=>s.val),1);
 
-function openWIPDept(sapEnc, deptEnc){
-  const sap=decodeURIComponent(sapEnc), dept=decodeURIComponent(deptEnc);
-  const j=getWIPEnhancedRows().find(x=>x.sapPO===sap);
-  const holder=document.getElementById('wip-drilldown');
-  if(!j||!holder) return;
-  let rows=[];
-  if(dept==='Printing') rows=j.components.map(c=>({job:j.jobNo,component:c.componentName,machine:c.machine,printedQty:c.producedQty,pendingQty:c.pendingQty,startDate:'2026-04-01',ageing:c.ageingDays,status:c.status}));
-  else if(dept==='Lamination') rows=['L1','L2','L3','L4'].map((stage,i)=>({stage,job:j.jobNo,component:j.components[i%j.components.length]?.componentName,inputMaterial:i===0?'Printed PET':'Output Roll '+i,addedMaterial:['PET','MPET','FOIL','PE'][i],outputMaterial:'Output Roll '+(i+1),inputQty:Math.round(j.currentQty*(.9-i*.08)),outputQty:Math.round(j.currentQty*(.82-i*.06)),wasteQty:Math.round(j.currentQty*.02),machine:['SS-01','SS-02','COMEXI','S-COMBI'][i],operator:['Ahmed','Bilal','Tariq','Faisal'][i],date:'2026-04-'+String(i+3).padStart(2,'0'),status:i<2?'Complete':'Pending'}));
-  else if(dept==='Slitting') rows=j.components.map(c=>({job:j.jobNo,component:c.componentName,machine:'SM-0'+((j.id%4)+1),plannedQty:c.pendingQty+c.producedQty,producedQty:c.producedQty,balanceQty:c.pendingQty,ageing:c.ageingDays}));
-  else if(dept==='Bag Making') rows=[{job:j.jobNo,machine:'BG-0'+((j.id%5)+1),producedBags:Math.round(j.producedQty*12),pendingBags:Math.round(j.balanceQty*12),efficiency:'78%',waste:'3.2%',readiness:j.components.every(c=>c.qualityStatus==='PASS')?'Ready For Bag Making':'Not Ready For Bag Making'}];
-  else rows=[{job:j.jobNo,status:j.readyForDispatch?'Ready For Dispatch':'Pending Dispatch',quantity:j.balanceQty,quality:j.qualityStatus}];
-  const keys=Object.keys(rows[0]||{});
-  holder.innerHTML=`<div class="section-header"><div class="section-title">${dept} Row-wise WIP Data - ${safeText(j.jobNo)}</div><button class="btn btn-outline btn-sm" onclick="openWIPJob('${sapEnc}')">← Back to Job</button></div>
-  <div class="table-card"><div class="table-header"><div class="table-title">${dept} Detail Rows</div><div style="font-size:11px;color:var(--text2)">${rows.length} rows</div></div><div style="overflow-x:auto"><table><thead><tr>${keys.map(k=>`<th>${k.replace(/([A-Z])/g,' $1').toUpperCase()}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${keys.map(k=>`<td>${safeText(r[k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`;
-}
-
-function renderWIP(container){
-  const jobs=getWIPEnhancedRows();
-  const totalQty=jobs.reduce((a,j)=>a+Number(j.currentQty||0),0);
-  const byStage=s=>jobs.filter(j=>j.currentStage===s).length;
-  const qHold=jobs.filter(j=>j.qualityStatus==='HOLD').length;
-  const delayed=jobs.filter(j=>j.delayed).length;
-  const ready=jobs.filter(j=>j.readyForDispatch).length;
-  const ageingBuckets=[['0-3 Days',0,3],['4-7 Days',4,7],['8-15 Days',8,15],['16-30 Days',16,30],['Above 30 Days',31,999]].map(b=>({bucket:b[0],jobs:jobs.filter(j=>j.ageingDays>=b[1]&&j.ageingDays<=b[2]).length,qty:jobs.filter(j=>j.ageingDays>=b[1]&&j.ageingDays<=b[2]).reduce((a,j)=>a+j.currentQty,0)}));
-  const deptQty=['Printing','Lamination','Slitting','Bag Making'].map(d=>({dept:d,qty:jobs.filter(j=>j.currentStage===d).reduce((a,j)=>a+j.currentQty,0),count:byStage(d),avg:Math.round((jobs.filter(j=>j.currentStage===d).reduce((a,j)=>a+j.ageingDays,0)/(byStage(d)||1))*10)/10}));
-  container.innerHTML=`
-    <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:600;color:var(--cyan)">📦 WIP Dashboard</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px">Printing → Dispatch</div>
-      </div>
-      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-        <div style="text-align:right">
-          <div style="font-size:10px;color:var(--text3)">ERP Last Synced</div>
-          <div style="font-size:12px;font-weight:600;color:var(--green)" id="wip-erp-sync-time">
-            ${(function(){
-              try{
-                var t=localStorage.getItem('upc_wip_sync_time');
-                if(!t){ var m=localStorage.getItem('upc_meta_v2'); if(m) t=JSON.parse(m).savedAt||''; }
-                if(t){ var dt=new Date(t); return ('0'+dt.getDate()).slice(-2)+'-'+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getMonth()]+'-'+dt.getFullYear()+' '+('0'+dt.getHours()).slice(-2)+':'+('0'+dt.getMinutes()).slice(-2); }
-                return 'Not yet synced';
-              }catch(e2){ return 'Unknown'; }
-            })()}
+  panel.style.display='block';
+  panel.innerHTML=`
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:14px;font-weight:700;color:var(--cyan);font-family:'Rajdhani',sans-serif">Order: ${r.order}</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">${r.matDesc||r.material||'–'} &nbsp;·&nbsp; ${r.material||''}</div>
+          <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">
+            ${wipStageBadge(r.currentStage)} ${wipStatusBadge(r.status)}
           </div>
-          <div style="font-size:9px;color:var(--text3)">(Note: Sheet LAST_UPDATED = when row data was entered, not when ERP synced)</div>
         </div>
-        <button class="btn btn-outline btn-sm" onclick="syncNowClick&&syncNowClick()">🔄 Sync WIP</button>
+        <button onclick="document.getElementById('wip-detail-panel').style.display='none'"
+          style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text2);cursor:pointer;font-size:12px">✕ Close</button>
       </div>
-    </div>
-    <div class="kpi-grid">
-      <div class="kpi-card cyan"><div class="kpi-value">${jobs.length}</div><div class="kpi-label">Total WIP Jobs</div><div class="kpi-target">Active jobs in production</div></div>
-      <div class="kpi-card green"><div class="kpi-value">${(totalQty/1000).toFixed(1)}T</div><div class="kpi-label">Total WIP Quantity</div><div class="kpi-target">KG/Tons currently in production</div></div>
-      <div class="kpi-card purple"><div class="kpi-value">${byStage('Printing')}</div><div class="kpi-label">Printing WIP</div><div class="kpi-target">Jobs in printing stage</div></div>
-      <div class="kpi-card orange"><div class="kpi-value">${byStage('Lamination')}</div><div class="kpi-label">Lamination WIP</div><div class="kpi-target">Jobs in lamination stage</div></div>
-      <div class="kpi-card cyan"><div class="kpi-value">${byStage('Slitting')}</div><div class="kpi-label">Slitting WIP</div><div class="kpi-target">Jobs in slitting stage</div></div>
-      <div class="kpi-card green"><div class="kpi-value">${byStage('Bag Making')}</div><div class="kpi-label">Bag Making WIP</div><div class="kpi-target">Jobs in bag making stage</div></div>
-      <div class="kpi-card red"><div class="kpi-value">${qHold}</div><div class="kpi-label">Quality Hold Jobs</div><div class="kpi-target">Jobs under quality hold</div></div>
-      <div class="kpi-card orange"><div class="kpi-value">${delayed}</div><div class="kpi-label">Delayed Jobs</div><div class="kpi-target">Exceeding planned completion date</div></div>
-    </div>
-    <div class="filter-bar" style="flex-wrap:wrap;gap:6px">
-      <input type="text" id="wip-global-search" placeholder="Search SAP / SFG / Job…" style="flex:1;min-width:160px;max-width:100%" oninput="filterWIPDashboard()">
-      <select id="wip-stage-filter" onchange="filterWIPDashboard()" style="flex:1;min-width:120px"><option value="">All Stages</option><option>Printing</option><option>Lamination</option><option>Slitting</option><option>Bag Making</option><option>Dispatch</option></select>
-      <select id="wip-quality-filter" onchange="filterWIPDashboard()" style="flex:1;min-width:120px"><option value="">All Quality</option><option>PASS</option><option>HOLD</option><option>REWORK</option><option>REJECT</option></select>
-      <button class="btn btn-outline btn-sm" onclick="document.getElementById('wip-global-search').value='';document.getElementById('wip-stage-filter').value='';document.getElementById('wip-quality-filter').value='';filterWIPDashboard()">Clear</button>
-      <span id="wip-search-info" class="badge badge-blue">${jobs.length} jobs</span>
-    </div>
-    <div id="wip-job-master-wrap">${wipJobMasterTable(jobs)}</div>
-    ${isAdmin()?`
-    <div style="margin-top:12px;background:var(--bg3);border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <div style="font-size:11px;color:var(--text3)">
-        🔧 <b>MAIN_ADMIN</b> - WIP cache: 
-        <span style="color:var(--cyan)">${(function(){try{var d=localStorage.getItem('upc_wip_v2');return d?Math.round(d.length/1024)+'KB ('+JSON.parse(d).length+' rows)':'Empty';}catch(e){return 'Error';}})()}</span>
-        &nbsp;|&nbsp; 
-        Sheet LAST_UPDATED = row data entry time (not ERP sync time)
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px">
+        <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;border-top:3px solid var(--cyan)">
+          <div style="font-size:9px;color:var(--text3);text-transform:uppercase">Order Qty</div>
+          <div style="font-size:16px;font-weight:700">${kgFmt(r.orderQty)}</div>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;border-top:3px solid var(--green)">
+          <div style="font-size:9px;color:var(--text3);text-transform:uppercase">Delivered</div>
+          <div style="font-size:16px;font-weight:700;color:var(--green)">${kgFmt(r.deliveredQty)}</div>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;border-top:3px solid var(--orange)">
+          <div style="font-size:9px;color:var(--text3);text-transform:uppercase">Total WIP</div>
+          <div style="font-size:16px;font-weight:700;color:var(--orange)">${kgFmt(total)}</div>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;border-top:3px solid #f472b6">
+          <div style="font-size:9px;color:var(--text3);text-transform:uppercase">Dispatch Qty</div>
+          <div style="font-size:16px;font-weight:700">${kgFmt(r.dispatchQty)}</div>
+        </div>
       </div>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-outline btn-sm" onclick="(function(){try{localStorage.removeItem('upc_wip_v2');localStorage.removeItem('upc_wip_sync_time');toast('WIP cache cleared - Sync Now to refresh','info');}catch(e){}})()">🗑 Clear WIP Cache</button>
-        <button class="btn btn-primary btn-sm" onclick="syncNowClick&&syncNowClick()">🔄 Force Sync WIP</button>
-      </div>
-    </div>`:''}
-    <div id="wip-drilldown"></div>
-    <div class="charts-grid">
-      <div class="chart-card"><div class="chart-header"><div><div class="chart-title">Job Progress Tracker</div><div class="chart-subtitle">Printing → Lamination → Slitting → Bag Making → Dispatch progress by current stage</div></div></div><div class="chart-wrap"><canvas id="wip-progress-chart"></canvas></div></div>
-      <div class="chart-card"><div class="chart-header"><div><div class="chart-title">Ageing Analysis</div><div class="chart-subtitle">Job count and quantity by ageing bucket</div></div></div><div class="chart-wrap"><canvas id="wip-ageing-chart"></canvas></div></div>
-      <div class="chart-card"><div class="chart-header"><div><div class="chart-title">WIP Summary Department Wise Quantity</div><div class="chart-subtitle">Printing, Lamination, Slitting, Bag Making and total WIP quantity</div></div></div><div class="chart-wrap"><canvas id="wip-summary-chart"></canvas></div></div>
-      <div class="chart-card"><div class="chart-header"><div><div class="chart-title">Quality Status Breakdown</div><div class="chart-subtitle">PASS / HOLD / REWORK / REJECT across all WIP jobs</div></div></div><div class="chart-wrap"><canvas id="wip-quality-chart"></canvas></div></div>
-    </div><div style="overflow-x:auto"><table><thead><tr><th>Job No</th><th>Front Panel</th><th>Back Panel</th><th>Side Gusset</th><th>Zipper</th><th>Result</th></tr></thead><tbody>${jobs.slice(0,8).map((j,i)=>`<tr><td>${safeText(j.jobNo)}</td><td>${wipBadge('Ready')}</td><td>${wipBadge('Ready')}</td><td>${wipBadge(i%3===0?'Pending':'Ready')}</td><td>${wipBadge(i%4===0?'Pending':'Ready')}</td><td>${wipBadge((i%3===0||i%4===0)?'Not Ready For Bag Making':'Ready For Bag Making')}</td></tr>`).join('')}</tbody></table></div></div>
-  `;
-  setTimeout(()=>{
-    const chartDefaults={responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8b949e',font:{size:10}}}},scales:{x:{ticks:{color:'#6e7681',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#6e7681',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}}}};
-    ['wipProgress','wipAgeing','wipSummary','wipQuality'].forEach(k=>{if(APP.chartInstances[k]) APP.chartInstances[k].destroy();});
-    const c1=document.getElementById('wip-progress-chart'); if(c1) APP.chartInstances.wipProgress=new Chart(c1,{type:'bar',data:{labels:['Printing','Lamination','Slitting','Bag Making','Dispatch'],datasets:[{label:'Jobs',data:['Printing','Lamination','Slitting','Bag Making','Dispatch'].map(byStage),borderRadius:5}]},options:chartDefaults});
-    const c3=document.getElementById('wip-ageing-chart'); if(c3) APP.chartInstances.wipAgeing=new Chart(c3,{type:'bar',data:{labels:ageingBuckets.map(x=>x.bucket),datasets:[{label:'Job Count',data:ageingBuckets.map(x=>x.jobs),borderRadius:5},{label:'Quantity',data:ageingBuckets.map(x=>x.qty),borderRadius:5}]},options:{...chartDefaults,plugins:{...chartDefaults.plugins,upValueLabels:{display:false}}}});
-    const c4=document.getElementById('wip-summary-chart'); if(c4) APP.chartInstances.wipSummary=new Chart(c4,{type:'bar',data:{labels:[...deptQty.map(x=>x.dept),'Total WIP'],datasets:[{label:'WIP Quantity',data:[...deptQty.map(x=>x.qty),totalQty],borderRadius:5}]},options:chartDefaults});
-    const qStatuses=['PASS','HOLD','REWORK','REJECT'];
-    const qCounts=qStatuses.map(s=>jobs.filter(j=>j.qualityStatus===s).length);
-    const c5=document.getElementById('wip-quality-chart'); if(c5) APP.chartInstances.wipQuality=new Chart(c5,{type:'doughnut',data:{labels:qStatuses,datasets:[{data:qCounts,backgroundColor:['rgba(63,185,80,.75)','rgba(248,81,73,.75)','rgba(240,136,62,.75)','rgba(163,113,247,.75)'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'right',labels:{color:'#8b949e',font:{size:10},boxWidth:10}}}}});
-  },100);
+
+      <div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">WIP by Stage</div>
+      ${stages.map(s=>`
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <div style="width:80px;font-size:10px;color:${s.color};font-weight:600">${s.label}</div>
+          <div style="flex:1;height:14px;background:var(--bg3);border-radius:4px;overflow:hidden">
+            <div style="height:14px;width:${maxVal>0?Math.round(s.val/maxVal*100):0}%;background:${s.color};border-radius:4px;transition:width .4s ease"></div>
+          </div>
+          <div style="width:70px;text-align:right;font-size:10px;font-weight:600;color:${s.color}">${kgFmt(s.val)}</div>
+        </div>
+      `).join('')}
+
+      ${r.varianceKg || r.variancePct ? `
+        <div style="margin-top:10px;padding:8px 10px;border-radius:6px;background:${(r.variancePct||0)>5?'rgba(239,68,68,.1)':'rgba(74,222,128,.08)'};border:1px solid ${(r.variancePct||0)>5?'rgba(239,68,68,.3)':'rgba(74,222,128,.2)'}">
+          <div style="font-size:10px;font-weight:600;color:${(r.variancePct||0)>5?'#ef4444':'var(--green)'}">
+            Variance: ${r.varianceKg>=0?'+':''}${(r.varianceKg||0).toFixed(2)} kg &nbsp;(${(r.variancePct||0).toFixed(1)}%)
+          </div>
+        </div>` : ''}
+    </div>`;
 }
 
-// =============================================
-// JOB ANALYSIS
-// =============================================
-// =============================================
-// JOB PROGRESS TRACKER
-// Data source: APP.planningData (PLANNING_ORDER_MASTER)
-// Drill-down:  APP.productionData (UP_PRODUCTION_MASTER)
-// No month filter - shows ALL orders from Planning Master.
-// =============================================
 
-// -- Valid order guard -----------------------------------------------------
-// Only material description is required - order number presence is optional.
-// This ensures orders with only SFG Order OR only FG Order both pass.
+// ════════════════════════════════════════════════════════════════
+// RENDER WIP SUMMARY — sidebar page
+// Shows WIP tab content (from jptRenderWIP) directly
+// Data: APP.planningData + APP.wipData
+// ════════════════════════════════════════════════════════════════
+window.renderWIPSummary = function(container){
+  // Sync WIP + Planning if empty
+  const planRows = (APP.planningData||[]).map(normPlanRow).filter(jptValidOrder);
+  const wipRows  = (APP.wipData||[]).map(normWIPRow).filter(r=>r.order&&r.order!=='0');
+
+  // Header with sync button
+  const syncBar = `
+    <div style="display:flex;justify-content:space-between;align-items:center;
+      background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+      padding:10px 16px;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-size:15px;font-weight:700;color:var(--cyan);font-family:'Rajdhani',sans-serif">📦 WIP Summary</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:1px">
+          ${planRows.length} planning orders · ${wipRows.length} WIP orders
+        </div>
+      </div>
+      <button id="wipsm-sync-btn" class="btn btn-primary btn-sm"
+        onclick="(async function(){
+          const b=document.getElementById('wipsm-sync-btn');
+          if(b){b.disabled=true;b.textContent='⟳ Syncing…';}
+          try{
+            await window.syncOneSource('PLANNING');
+            await window.syncWIPMaster({silent:true,btnId:null});
+            window.renderWIPSummary(document.getElementById('main-content'));
+          }catch(e){ if(typeof toast==='function') toast('Sync failed: '+e.message,'error'); }
+          finally{ if(b){b.disabled=false;b.textContent='🔄 Sync';} }
+        })()">🔄 Sync</button>
+    </div>`;
+
+  // If no data, show empty state
+  if(!planRows.length && !wipRows.length){
+    container.innerHTML = syncBar + `
+      <div style="max-width:440px;margin:40px auto;text-align:center">
+        <div style="font-size:48px;margin-bottom:12px">📦</div>
+        <div style="font-size:16px;font-weight:700;color:var(--cyan);margin-bottom:8px">No WIP Data Loaded</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:20px;line-height:1.6">
+          Click <b>Sync</b> above to load from<br>
+          <span style="font-family:monospace;font-size:11px;color:var(--cyan)">PLANNING_ORDER_MASTER + WIP_ORDER_LINK</span>
+        </div>
+      </div>`;
+    return;
+  }
+
+  // Render jptRenderWIP content (the full WIP analysis view)
+  const wipContent = (typeof jptRenderWIP === 'function')
+    ? jptRenderWIP(planRows)
+    : '<div style="padding:24px;color:var(--text3)">WIP module not loaded.</div>';
+
+  container.innerHTML = syncBar + wipContent;
+
+  // Draw WIP chart after render
+  setTimeout(function(){
+    try{ if(typeof jptDrawWIPChart==='function') jptDrawWIPChart(planRows); }catch(e){}
+  }, 120);
+};
+
+
+function normWIPRow(r){
+  // Normalize key: Apps Script converts "PRINTING BALANCE KG" → PRINTING_BALANCE_KG
+  const n=(...k)=>{ for(const x of k){ const v=r[x]; if(v!==undefined&&v!==null&&String(v).trim()!='') return String(v).trim(); } return ''; };
+  const num=(...k)=>{ const v=n(...k); const f=parseFloat(String(v).replace(/,/g,'')); return isNaN(f)?0:f; };
+  const order   = n('ORDER','SFG_ORDER');
+  const orderN  = order.replace(/\.0+$/,'');   // strip Excel .0 suffix
+  const matN    = n('MATERIAL').replace(/\.0+$/,'');
+  // Sheet exact columns (WIP_ORDER_LINK row 5):
+  // ORDER,MATERIAL,MATERIAL_DESCRIPTION,ORDER_QTY_KG,DELIVERED_QTY_KG,
+  // PRINTING_PRODUCED_KG,PRINTING_USED_BY_LAMINATION_KG,PRINTING_BALANCE_KG,
+  // LAMINATION_PRODUCED_KG,LAMINATION_USED_BY_SLITTING_KG,LAMINATION_BALANCE_KG,
+  // SLITTING_PRODUCED_KG,SLITTING_USED_BY_BAG_KG,SLITTING_BALANCE_KG,
+  // TOTAL_WIP_KG,DISPATCH_QTY_KG,VARIANCE_KG,VARIANCE_PERCENT,ORDER_STATUS,CURRENT_STAGE,LAST_UPDATED
+  const printProd  = num('PRINTING_PRODUCED_KG');
+  const printUsed  = num('PRINTING_USED_BY_LAMINATION_KG');
+  const printBal   = num('PRINTING_BALANCE_KG');
+  const lamProd    = num('LAMINATION_PRODUCED_KG');
+  const lamUsed    = num('LAMINATION_USED_BY_SLITTING_KG');
+  const lamBal     = num('LAMINATION_BALANCE_KG');
+  const slitProd   = num('SLITTING_PRODUCED_KG');
+  const slitUsed   = num('SLITTING_USED_BY_BAG_KG');
+  const slitBal    = num('SLITTING_BALANCE_KG');
+  const totalWIP   = num('TOTAL_WIP_KG') || (printBal + lamBal + slitBal);
+  const varKg      = num('VARIANCE_KG');
+  const varPct     = num('VARIANCE_PERCENT');
+  const status     = n('ORDER_STATUS') || 'OPEN';
+  const stage      = n('CURRENT_STAGE');
+  // Derive current stage from which balance is largest if not set
+  const derivedStage = stage || (slitUsed>0?'BAG MAKING':slitBal>0?'SLITTING':lamBal>0?'LAMINATION':printBal>0?'PRINTING':'');
+  return {
+    order        : orderN || order,
+    material     : matN || n('MATERIAL'),
+    matDesc      : n('MATERIAL_DESCRIPTION'),
+    orderQty     : num('ORDER_QTY_KG'),
+    deliveredQty : num('DELIVERED_QTY_KG'),
+    // Printing stage
+    printProd, printUsed,
+    printBalance : printBal,
+    // Lamination stage
+    lamProd, lamUsed,
+    lamBalance   : lamBal,
+    // Slitting stage
+    slitProd, slitUsed,
+    slitBalance  : slitBal,
+    // Derived bag-making WIP (slitting used by bag)
+    bagBalance   : slitUsed,
+    totalWIP,
+    dispatchQty  : num('DISPATCH_QTY_KG'),
+    varianceKg   : varKg,
+    variancePct  : varPct,
+    status,
+    currentStage : derivedStage,
+    lastUpdated  : n('LAST_UPDATED'),
+  };
+}
+
+
+// ── Main render ──────────────────────────────────────────────────────────────
+function renderWIP(container){
+  const raw    = (APP.wipData||[]).map(normWIPRow).filter(r=>r.order&&r.order!=='0');
+  const active = raw.filter(r=>{ const u=(r.status||'').toUpperCase(); return u==='IN PROGRESS'||u==='IN PROGESS'||u==='ON HOLD'; });
+
+  // Aggregates
+  const totalWIP  = raw.reduce((a,r)=>a+r.totalWIP,0);
+  const printWIP  = raw.reduce((a,r)=>a+r.printBalance,0);
+  const lamWIP    = raw.reduce((a,r)=>a+r.lamBalance,0);
+  const slitWIP   = raw.reduce((a,r)=>a+r.slitBalance,0);
+  const bagWIP    = raw.reduce((a,r)=>a+(r.bagBalance||0),0);
+  const completed = raw.filter(r=>(r.status||'').toUpperCase()==='COMPLETED').length;
+
+  const kgFmt = v => v>0?(v>=1000?(v/1000).toFixed(2)+' T':Math.round(v)+' kg'):'0';
+
+  // Sync time
+  function _syncTime(){
+    try{
+      const t=localStorage.getItem('upc_wip_sync_time');
+      if(!t) return 'Not synced yet';
+      const d=new Date(t), MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const ago=Math.round((Date.now()-d)/60000);
+      return ('0'+d.getDate()).slice(-2)+'-'+MONTHS[d.getMonth()]+'-'+d.getFullYear()
+             +' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)
+             +' ('+(ago<1?'just now':ago<60?ago+'m ago':Math.floor(ago/60)+'h ago')+')';
+    }catch(e){ return 'Unknown'; }
+  }
+
+  // Empty state
+  if(!raw.length){
+    container.innerHTML=`
+      <div style="max-width:480px;margin:60px auto;text-align:center">
+        <div style="font-size:48px;margin-bottom:12px">📦</div>
+        <div style="font-size:18px;font-weight:700;font-family:'Rajdhani',sans-serif;color:var(--cyan);margin-bottom:8px">WIP Data Not Loaded</div>
+        <div style="font-size:13px;color:var(--text3);margin-bottom:24px;line-height:1.6">
+          No WIP orders in memory.<br>Click <b>Sync WIP</b> to fetch live data from<br>
+          <span style="font-family:monospace;color:var(--cyan)">WIP_MATERIAL_MASTER → WIP_ORDER_LINK</span>
+        </div>
+        <button id="wip-sync-btn" class="btn btn-primary" style="font-size:14px;padding:10px 28px" onclick="syncWIPMaster()">🔄 Sync WIP Now</button>
+        <div style="margin-top:12px;font-size:11px;color:var(--text3)">Last sync: <span id="wip-sync-badge">${_syncTime()}</span></div>
+      </div>`;
+    return;
+  }
+
+  // Unique stages for filter
+  const allStages=[...new Set(raw.map(r=>r.currentStage).filter(Boolean))].sort();
+  const allStatuses=[...new Set(raw.map(r=>r.status).filter(Boolean))].sort();
+
+  container.innerHTML=`
+    <!-- ── Header ── -->
+    <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 16px;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:15px;font-weight:700;color:var(--cyan);font-family:'Rajdhani',sans-serif">📦 WIP Master — Live</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:2px">
+          Last Synced: <span id="wip-sync-badge" style="color:var(--green)">${_syncTime()}</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div style="font-size:11px;color:var(--text3)">${raw.length} orders &nbsp;·&nbsp; ${active.length} active &nbsp;·&nbsp; ${completed} completed</div>
+        <button id="wip-sync-btn" class="btn btn-primary btn-sm" onclick="syncWIPMaster()">🔄 Sync WIP</button>
+      </div>
+    </div>
+
+    <!-- ── KPI Row ── -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:14px">
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;border-top:3px solid var(--orange)">
+        <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Total WIP</div>
+        <div style="font-size:20px;font-weight:700;color:var(--orange)">${kgFmt(totalWIP)}</div>
+        <div style="font-size:9px;color:var(--text3)">${raw.length} orders</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;border-top:3px solid #22d3ee">
+        <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Printing WIP</div>
+        <div style="font-size:20px;font-weight:700;color:#22d3ee">${kgFmt(printWIP)}</div>
+        <div style="font-size:9px;color:var(--text3)">${raw.filter(r=>r.printBalance>0).length} orders</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;border-top:3px solid #a78bfa">
+        <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Lamination WIP</div>
+        <div style="font-size:20px;font-weight:700;color:#a78bfa">${kgFmt(lamWIP)}</div>
+        <div style="font-size:9px;color:var(--text3)">${raw.filter(r=>r.lamBalance>0).length} orders</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;border-top:3px solid #34d399">
+        <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Slitting WIP</div>
+        <div style="font-size:20px;font-weight:700;color:#34d399">${kgFmt(slitWIP)}</div>
+        <div style="font-size:9px;color:var(--text3)">${raw.filter(r=>r.slitBalance>0).length} orders</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;border-top:3px solid #fb923c">
+        <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Bag Making WIP</div>
+        <div style="font-size:20px;font-weight:700;color:#fb923c">${kgFmt(bagWIP)}</div>
+        <div style="font-size:9px;color:var(--text3)">${raw.filter(r=>(r.bagBalance||0)>0).length} orders</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;border-top:3px solid var(--green)">
+        <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Active Orders</div>
+        <div style="font-size:20px;font-weight:700;color:var(--green)">${active.length}</div>
+        <div style="font-size:9px;color:var(--text3)">${completed} completed</div>
+      </div>
+    </div>
+
+    <!-- ── Filter Bar ── -->
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;align-items:center">
+      <input type="text" id="wip-global-search" placeholder="Search order / material / description…"
+        style="flex:2;min-width:180px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none"
+        oninput="filterWIPDashboard()">
+      <select id="wip-stage-filter" onchange="filterWIPDashboard()"
+        style="flex:1;min-width:120px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:12px;outline:none">
+        <option value="">All Stages</option>
+        ${allStages.map(s=>`<option value="${s}">${s}</option>`).join('')}
+      </select>
+      <select id="wip-status-filter" onchange="filterWIPDashboard()"
+        style="flex:1;min-width:120px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:12px;outline:none">
+        <option value="">All Status</option>
+        ${allStatuses.map(s=>`<option value="${s}">${s}</option>`).join('')}
+      </select>
+      <button onclick="document.getElementById('wip-global-search').value='';document.getElementById('wip-stage-filter').value='';document.getElementById('wip-status-filter').value='';filterWIPDashboard()"
+        class="btn btn-outline btn-sm">Clear</button>
+      <span id="wip-search-info" class="badge badge-blue">${raw.length} orders</span>
+    </div>
+
+    <!-- ── Detail Panel (hidden until row clicked) ── -->
+    <div id="wip-detail-panel" style="display:none"></div>
+
+    <!-- ── Table ── -->
+    <div class="table-card" style="padding:0">
+      <div style="overflow:auto;max-height:calc(100vh - 320px);-webkit-overflow-scrolling:touch">
+        <table style="border-collapse:separate;border-spacing:0;min-width:900px">
+          <thead>
+            <tr>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px;white-space:nowrap">ORDER</th>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px;white-space:nowrap">MATERIAL</th>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px">DESCRIPTION</th>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px;text-align:right">ORDER QTY</th>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px;text-align:right">DELIVERED</th>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px;text-align:right;color:#22d3ee">PRINT WIP</th>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px;text-align:right;color:#a78bfa">LAM WIP</th>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px;text-align:right;color:#34d399">SLIT WIP</th>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px;text-align:right;color:#fb923c">BAG WIP</th>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px;text-align:right;font-weight:700">TOTAL WIP</th>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px">STAGE</th>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px">STATUS</th>
+              <th style="position:sticky;top:0;z-index:2;background:var(--bg2);font-size:10px"></th>
+            </tr>
+          </thead>
+          <tbody id="wip-table-body">
+            ${_wipTableRows(raw)}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// Backward compat stubs for legacy callers
+function getWIPEnhancedRows(){ return (APP.wipData||[]).map(normWIPRow).filter(r=>r.order&&r.order!=='0'); }
+function openWIPJob(enc){ wipOpenDetail(0, enc); }
+
+
 function jptValidOrder(p){
   return !!(p.matDesc && String(p.matDesc).trim());
 }
@@ -4170,7 +4519,8 @@ window.jptForceRefresh = async function(){
   if(btn){btn.disabled=true;btn.textContent='🔄 Syncing...';}
   try{
     // 1. Sync Planning
-    let data=await window.syncOneSource('PLANNING_ORDER_MASTER');
+    // 'PLANNING' is the correct syncOneSource key (maps to PLANNING_ORDER_MASTER sheet)
+    let data=await window.syncOneSource('PLANNING');
     if(!Array.isArray(data)||!data.length){
       await syncAllSheets();
       data=APP.planningData||[];
@@ -4178,9 +4528,9 @@ window.jptForceRefresh = async function(){
       APP.planningData=data;
       try{localStorage.setItem('upc_planning_v2',JSON.stringify(data));}catch(e){}
     }
-    // 2. Auto-sync WIP after Planning (WIP depends on Planning orders)
+    // 2. Auto-sync WIP — 'WIP' is the correct syncOneSource key
     try{
-      const wipData=await window.syncOneSource('WIP_MATERIAL_MASTER');
+      const wipData=await window.syncOneSource('WIP');
       if(Array.isArray(wipData)&&wipData.length){
         APP.wipData=wipData;
         debugLog('ok','WIP auto-refreshed after Planning',wipData.length+' rows');
@@ -4246,19 +4596,67 @@ function jptAgeBadge(days){
 }
 
 // -- Main render ----------------------------------------------------------
+// ════════════════════════════════════════════════════════════════
+// JOB PROGRESS TRACKER — Rebuilt UI v2.0
+// Sources: APP.planningData (PLANNING_ORDER_MASTER) + APP.wipData
+// Tabs: Overview · Running Orders · All Orders · WIP Summary
+// ════════════════════════════════════════════════════════════════
 function renderJobTracker(container){
-  const allRows=(APP.planningData||[]).map(normPlanRow).filter(jptValidOrder);
-  const runCount=allRows.filter(jptIsRunning).length;
+  // If no planning data, show auto-sync state
+  const allRows = (APP.planningData||[]).map(normPlanRow).filter(jptValidOrder);
+  if(!allRows.length){
+    container.innerHTML=`
+      <div style="max-width:460px;margin:60px auto;text-align:center">
+        <div style="font-size:48px;margin-bottom:12px">📋</div>
+        <div style="font-size:18px;font-weight:700;font-family:'Rajdhani',sans-serif;color:var(--cyan);margin-bottom:8px">Job Progress Tracker</div>
+        <div style="font-size:13px;color:var(--text3);margin-bottom:6px;line-height:1.6">
+          Planning data not loaded yet.<br>Auto-sync is running in background…
+        </div>
+        <div id="jpt-loading-status" style="font-size:11px;color:var(--text3);margin-bottom:20px">Fetching from PLANNING_ORDER_MASTER…</div>
+        <button class="btn btn-primary" style="font-size:14px;padding:10px 28px"
+          onclick="jptForceRefresh()">🔄 Load Now</button>
+      </div>`;
+    // Auto-trigger sync if data not loaded
+    if(!(APP.planningData||[]).length){
+      setTimeout(async function(){
+        try{
+          const rows = await window.syncOneSource('PLANNING');
+          if(rows && rows.length){
+            renderJobTracker(container);
+          } else {
+            const el=document.getElementById('jpt-loading-status');
+            if(el) el.textContent='Sync returned 0 rows — check Apps Script connection.';
+          }
+        }catch(e){
+          const el=document.getElementById('jpt-loading-status');
+          if(el) el.textContent='Error: '+e.message;
+        }
+      }, 200);
+    }
+    return;
+  }
+
+  const runCount = allRows.filter(jptIsRunning).length;
+  const wipRows  = (APP.wipData||[]).map(normWIPRow).filter(r=>r.order&&r.order!=='0');
+
   container.innerHTML=`
-    <div class="tabs" id="jpt-tabs">
-      <div class="tab active" onclick="jptSwitchTab('overview',this)">📊 Executive View</div>
-      <div class="tab" onclick="jptSwitchTab('running',this)">🚀 Running Orders <span class="badge badge-orange" style="font-size:9px;margin-left:4px">${runCount}</span></div>
+    <div class="tabs" id="jpt-tabs" style="position:sticky;top:0;z-index:10;background:var(--bg)">
+      <div class="tab active" onclick="jptSwitchTab('overview',this)">📊 Overview</div>
+      <div class="tab" onclick="jptSwitchTab('running',this)">
+        🚀 Running
+        <span class="badge badge-orange" style="font-size:9px;margin-left:4px">${runCount}</span>
+      </div>
       <div class="tab" onclick="jptSwitchTab('orders',this)">📋 All Orders</div>
-      <div class="tab" onclick="jptSwitchTab('wip',this)">📦 WIP Summary</div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:6px;padding:0 10px">
+        <span style="font-size:10px;color:var(--text3)">${allRows.length} orders</span>
+        <button id="jpt-refresh-btn" class="btn btn-primary btn-sm"
+          onclick="jptForceRefresh()">🔄 Refresh</button>
+      </div>
     </div>
-    <div id="jpt-tab-content">${jptRenderOverview(allRows)}</div>`;
-  setTimeout(()=>jptDrawOverviewChart(allRows),120);
+    <div id="jpt-tab-content" style="padding-top:4px">${jptRenderOverview(allRows)}</div>`;
+  setTimeout(()=>jptDrawOverviewChart(allRows), 120);
 }
+
 
 // -- Master table ---------------------------------------------------------
 function jptMasterTable(rows){
@@ -4830,12 +5228,15 @@ function jptRenderWIP(allPlanRows){
   const cleanOrd=v=>String(v||'').replace(/\.0+$/,'').trim();
   // WIP tab: only show IN PROGRESS, ON HOLD, COMPLETED
   // ORDER_STATUS comes from Planning Master Col E (written by Apps Script into WIP_ORDER_LINK)
-  const _WIP_SHOW_STATUS = new Set(['IN PROGRESS','IN PROGESS','ON HOLD','COMPLETED']);
+  // Accept all meaningful statuses from WIP_ORDER_LINK (OPEN, IN PROGRESS, ON HOLD, COMPLETED)
+  // Exclude only CLOSED/CANCELLED/DISPATCHED completely-done orders
+  // Exclude closed/completed/cancelled orders — only show active WIP
+  const _WIP_EXCLUDE_STATUS = new Set(['CLOSED','COMPLETED','CANCELLED','REJECTED','DISPATCHED']);
   const rows=raw.map(normWIPRow).filter(r=>{
     if(!r.order||cleanOrd(r.order)==='0') return false;
     const st = String(r.status||'').toUpperCase().replace(/\s+/g,' ').trim();
-    if(!_WIP_SHOW_STATUS.has(st)) return false;
-    return true;
+    if(_WIP_EXCLUDE_STATUS.has(st)) return false;
+    return true;  // show OPEN, IN PROGRESS, ON HOLD, COMPLETED, DISPATCHED etc.
   });
 
   if(!rows.length){
@@ -4988,8 +5389,8 @@ function jptRenderWIP(allPlanRows){
     </div>
 
     <!-- SECTION 5 - ALL ORDERS TABLE -->
-    <div class="table-card" style="padding:0">
-      <div class="table-header" style="padding:10px 14px">
+    <div class="table-card">
+      <div class="table-header">
         <div class="table-title">All Orders - WIP Breakdown (WIP_ORDER_LINK)</div>
         <div style="font-size:11px;color:var(--text2)">${rows.length} orders · click any row to expand production history</div>
       </div>
@@ -5223,7 +5624,6 @@ function jptCanonStatus(p){
          up==='IN FG'?'IN FG':up==='CLOSED'?'CLOSED':
          up==='COMPLETED'?'COMPLETED':up==='HOLD'?'HOLD':p.jobStatus||'Unknown';
 }
-
 // -- CEO Executive View ----------------------------------------------------
 function jptRenderOverview(rows){
   if(!rows.length){
@@ -11847,35 +12247,55 @@ syncOneSource = async function(key){
       debugLog(users.length?'ok':'err','PASSWORD_MASTER user load',`${users.length} active user(s) parsed. Expected users include main_admin, director, manager, usman, ejaz, slitting, bagmaking, quality.`);
       return users;
     }
-    // WIP / PLANNING / MASTER_DATA — read via readsheet action through Apps Script
-    // Uses erpApi() which routes via APP.settings.appScriptUrl (the deployed Apps Script URL)
-    // Apps Script doGet action=readsheet: reads any sheetId+tab+headerRow directly ✓
+    // WIP / PLANNING / MASTER_DATA — read via readsheet action
+    // PRIMARY: call Apps Script DIRECTLY (bypasses Cloudflare cache)
     if(key==='WIP' || key==='MASTER_DATA' || key==='PLANNING'){
       const _sheetId = cfg.sourceSheetId;
       const _tab     = cfg.sourceTabName;
       const _hdr     = key==='MASTER_DATA' ? 4 : 5;
-      // Try 1: erpApi (routes to Apps Script via APP.settings.appScriptUrl)
       let _fetched = false;
-      try{
-        const _json = await erpApi({
-          action:'readsheet', sheetId:_sheetId, tab:_tab, headerRow:_hdr
-        });
-        if(_json && _json.ok && Array.isArray(_json.rows) && _json.rows.length){
-          allRows = _json.rows;
-          _fetched = true;
-          debugLog('ok', cfg.sourceSheetName+'/'+_tab+' via erpApi', allRows.length+' rows');
-        } else {
-          debugLog('warn', cfg.sourceSheetName+'/'+_tab+' erpApi empty', JSON.stringify(_json).slice(0,80));
-        }
-      }catch(e){
-        debugLog('warn', cfg.sourceSheetName+' erpApi failed', e.message);
+
+      // Try 1: Direct Apps Script URL (user-configured, bypasses Cloudflare proxy)
+      const _directUrl = localStorage.getItem('up_appScriptUrl') ||
+                         (APP&&APP.settings&&APP.settings.appScriptUrl) || '';
+      if(_directUrl && _directUrl.includes('script.google.com')){
+        try{
+          const _u = new URL(_directUrl);
+          _u.searchParams.set('action','readsheet');
+          _u.searchParams.set('sheetId', _sheetId);
+          _u.searchParams.set('tab', _tab);
+          _u.searchParams.set('headerRow', String(_hdr));
+          _u.searchParams.set('_', String(Date.now()));
+          const _res  = await fetch(_u.toString(), {cache:'no-store', redirect:'follow'});
+          const _json = await _res.json();
+          if(_json && _json.ok && Array.isArray(_json.rows) && _json.rows.length){
+            allRows = _json.rows;
+            _fetched = true;
+            debugLog('ok', cfg.sourceSheetName+'/'+_tab+' direct', allRows.length+' rows');
+          }
+        }catch(e){ debugLog('warn', cfg.sourceSheetName+' direct failed', e.message); }
       }
-      // Try 2: Direct Apps Script URL fallback (if erpApi failed or returned empty)
+
+      // Try 2: erpApi via Cloudflare proxy
       if(!_fetched){
-        const _scriptUrl = APP?.settings?.appScriptUrl || ERP_SHEET_CONFIG?.APP_SCRIPT_URL || '';
-        if(_scriptUrl){
+        try{
+          const _json = await erpApi({
+            action:'readsheet', sheetId:_sheetId, tab:_tab, headerRow:_hdr
+          });
+          if(_json && _json.ok && Array.isArray(_json.rows) && _json.rows.length){
+            allRows = _json.rows;
+            _fetched = true;
+            debugLog('ok', cfg.sourceSheetName+'/'+_tab+' erpApi', allRows.length+' rows');
+          }
+        }catch(e){ debugLog('warn', cfg.sourceSheetName+' erpApi failed', e.message); }
+      }
+
+      // Try 3: Cloudflare Worker URL directly
+      if(!_fetched){
+        const _proxyUrl = ERP_SHEET_CONFIG?.APP_SCRIPT_URL || '';
+        if(_proxyUrl){
           try{
-            const _u = new URL(_scriptUrl);
+            const _u = new URL(_proxyUrl);
             _u.searchParams.set('action','readsheet');
             _u.searchParams.set('sheetId', _sheetId);
             _u.searchParams.set('tab', _tab);
@@ -11883,17 +12303,11 @@ syncOneSource = async function(key){
             _u.searchParams.set('_', String(Date.now()));
             const _res  = await fetch(_u.toString(), {cache:'no-store', redirect:'follow'});
             const _json = await _res.json();
-            if(_json && _json.ok && Array.isArray(_json.rows)){
+            if(_json && _json.ok && Array.isArray(_json.rows) && _json.rows.length){
               allRows = _json.rows;
-              debugLog('ok', cfg.sourceSheetName+'/'+_tab+' via direct URL', allRows.length+' rows');
-            } else {
-              debugLog('warn', cfg.sourceSheetName+' direct URL empty', JSON.stringify(_json).slice(0,80));
+              debugLog('ok', cfg.sourceSheetName+'/'+_tab+' proxy', allRows.length+' rows');
             }
-          }catch(e){
-            debugLog('err', cfg.sourceSheetName+' all fetch attempts failed', e.message);
-          }
-        } else {
-          debugLog('warn', cfg.sourceSheetName, 'No Apps Script URL configured — go to Settings → App Script');
+          }catch(e){ debugLog('err', cfg.sourceSheetName+' all attempts failed', e.message); }
         }
       }
     } else {
@@ -12322,10 +12736,8 @@ async function syncNowClick(){
       // so it cannot use sseFetchDept (action=read&dept=WIP fails on Apps Script)
       // Instead call syncOneSource which uses action=readsheet with the correct sheetId
       if(dept === 'WIP'){
-        const wipRows = await syncOneSource('WIP');
-        // syncOneSource('WIP') already sets APP.wipData and saves cache
-        // Just re-render the page with fresh data
-        debugLog('ok','WIP sync complete', (wipRows||[]).length+' rows');
+        // Use dedicated syncWIPMaster for clean, reliable WIP fetch
+        await window.syncWIPMaster({silent:true});
       } else {
         const rows = await sseFetchDept(dept, fromDate);
         sseApplyRows(rows);
@@ -12358,8 +12770,33 @@ doLogin = async function(){
   if(loginBtn){ loginBtn.disabled=true; loginBtn.textContent='Logging in...'; }
   try{
     await __UP_PREVIOUS_DO_LOGIN();
-    // UPC: startAutoSync removed - no auto background sync
-    // UPC: syncAllSheets not called here - user clicks Sync Now when they want fresh data
+    // ACM: refresh permissions immediately after login (concurrent, non-blocking)
+    // This ensures sidebar tabs are correct without waiting for Sync Now
+    setTimeout(async function(){
+      try{
+        if(typeof window.restoreACMFromCache === 'function') window.restoreACMFromCache();
+        if(typeof window.applySidebarRoles === 'function') window.applySidebarRoles();
+        // Fresh ACM from sheet (replaces cache for next time)
+        if(typeof window.loadAndMergeACM === 'function') await window.loadAndMergeACM();
+        if(typeof window.applySidebarRoles === 'function') window.applySidebarRoles();
+        debugLog('ok','Login ACM refresh complete','sidebar updated');
+      }catch(e){ debugLog('warn','Login ACM refresh failed',e.message); }
+    }, 200);
+    // Auto-sync WIP + Planning silently in background after login
+    setTimeout(async function(){
+      try{
+        const planRows = await window.syncOneSource('PLANNING');
+        if(planRows && planRows.length) debugLog('ok','Login auto-sync: Planning',planRows.length+' rows');
+        await window.syncWIPMaster({silent:true, btnId:null});
+        // Re-render current page with fresh data
+        if(APP.currentPage==='jobtracker' && typeof renderJobTracker==='function')
+          renderJobTracker(document.getElementById('main-content'));
+        if(APP.currentPage==='wipsum' && typeof renderWIPSummary==='function')
+          renderWIPSummary(document.getElementById('main-content'));
+        if(APP.currentPage==='wip' && typeof renderWIP==='function')
+          renderWIP(document.getElementById('main-content'));
+      }catch(e){ debugLog('warn','Login auto-sync failed',e.message); }
+    }, 1800);
   }finally{
     if(loginBtn){ loginBtn.disabled=false; loginBtn.textContent='Login'; }
   }
@@ -13701,7 +14138,7 @@ navigate = (function(orig){
 (function(){
   const VALID_PAGES = new Set([
     'dashboard','ink','printing','lamination','slitting','bagmaking','quality','wastage',
-    'effcenter','downtime','jobtracker','alldata','reports','importexport','settings',
+    'effcenter','downtime','jobtracker','wipsum','alldata','reports','importexport','settings',
     'dispatch','wip','maintenance','cache'
   ]);
   function cleanPage(page){
@@ -13941,6 +14378,7 @@ navigate = (function(orig){
       // Aliases: ACM key → sidebar navigate key
       if(allowed.has('jobprogress')) allowed.add('jobtracker');
       if(allowed.has('jobtracker'))  allowed.add('jobprogress');
+      allowed.add('wipsum'); // WIP Summary always accessible
       if(allowed.has('fgstock'))     allowed.add('dispatch');
       allowed.add('logout'); allowed.add('cache');
     } else {
@@ -13949,14 +14387,21 @@ navigate = (function(orig){
       var isTech     = isTechnicalTeam();
       var isIncharge = isMaintenanceIncharge();
       if (isTech || isIncharge) {
-        allowed = new Set(['dashboard', 'downtime', 'maintenance']);
+        allowed = new Set(['dashboard', 'downtime', 'maintenance', 'wip', 'wipsum', 'jobtracker']);
       } else {
         // Production incharges, shift incharges, and any other non-admin role:
         // safe minimal default until ACM loads — dashboard + maintenance only
-        allowed = new Set(['dashboard', 'maintenance']);
+        allowed = new Set(['dashboard', 'maintenance', 'wip', 'wipsum', 'jobtracker']);
       }
     }
 
+    // -- Reset all nav items to visible first (prevent compounding on re-calls)
+    document.querySelectorAll('.nav-item[onclick]').forEach(function(el) {
+      el.style.display = '';
+    });
+    document.querySelectorAll('.nav-group').forEach(function(g) {
+      g.style.display = '';
+    });
     // -- Hide sidebar nav items not in allowed set ------------
     document.querySelectorAll('.nav-item[onclick]').forEach(function(el) {
       var m    = (el.getAttribute('onclick') || '').match(/navigate\('([^']+)'\)/);
@@ -13965,6 +14410,10 @@ navigate = (function(orig){
         el.style.display = 'none';
       }
     });
+
+    // -- Force wipsum always visible (regardless of other items in group) --
+    var _wipEl = document.getElementById('nav-wipsum-item');
+    if(_wipEl){ _wipEl.style.display = ''; }
 
     // -- Hide empty nav-groups ---------------------------------
     document.querySelectorAll('.nav-group').forEach(function(g) {
@@ -13991,6 +14440,12 @@ navigate = (function(orig){
           Object.keys(_mods).forEach(function(k) {
             if (_mods[k] === true || String(_mods[k]).toUpperCase() === 'TRUE') _allowed.add(k.toLowerCase());
           });
+          // Aliases — same as applySidebarRoles
+          if(_allowed.has('jobprogress')) _allowed.add('jobtracker');
+          if(_allowed.has('jobtracker'))  _allowed.add('jobprogress');
+          if(_allowed.has('jobtracker')||_allowed.has('wip')||_allowed.has('jobprogress')||_allowed.has('wipsum')) _allowed.add('wipsum');
+          if(_allowed.has('fgstock'))     _allowed.add('dispatch');
+          _allowed.add('logout'); _allowed.add('cache'); _allowed.add('wipsum');
         } else {
           // ACM not loaded yet — try to load it now, apply minimal restriction temporarily
           if(typeof window.loadAndMergeACM === 'function'){
@@ -13999,13 +14454,13 @@ navigate = (function(orig){
             }).catch(function(){});
           }
           if (isTechnicalTeam() || isMaintenanceIncharge()) {
-            _allowed = new Set(['dashboard', 'downtime', 'maintenance']);
+            _allowed = new Set(['dashboard', 'downtime', 'maintenance', 'wip', 'wipsum', 'jobtracker']);
           } else {
-            _allowed = new Set(['dashboard', 'maintenance']);
+            _allowed = new Set(['dashboard', 'maintenance', 'wip', 'wipsum', 'jobtracker']);
           }
         }
         if (!_allowed.has(page)) {
-          if (typeof toast === 'function') toast('Is section ka access nahi hai.', 'error');
+          if (typeof toast === 'function') toast('You do not have access to this section. Sync Now to refresh permissions.', 'error');
           return;
         }
         if (typeof _origNav === 'function') _origNav(page);
@@ -20998,7 +21453,9 @@ function upcHookLogin(){
         if(typeof toast==='function') toast('Offline mode - showing cached data. Sync when online.','info');
         if(cachedUser.role==='MAIN_ADMIN') upcStartBackupScheduler();
         upcStartPeriodicSave();
+        try{ if(typeof window.restoreACMFromCache==='function') window.restoreACMFromCache(); }catch(e){}
         try{ if(typeof window.applySidebarRoles==='function') window.applySidebarRoles(); }catch(e){}
+        setTimeout(function(){ try{ if(typeof window.loadAndMergeACM==='function') window.loadAndMergeACM(); }catch(e){}}, 600);
         log('ok','UPC offline login',''+cachedUser.username);
         return true;
       } else {
@@ -21033,7 +21490,9 @@ function upcHookLogin(){
         if(typeof toast==='function') toast('Opened from cache. Click 🔄 Sync Now for latest data.','success');
         if(cachedUser2.role==='MAIN_ADMIN') upcStartBackupScheduler();
         upcStartPeriodicSave();
+        try{ if(typeof window.restoreACMFromCache==='function') window.restoreACMFromCache(); }catch(e){}
         try{ if(typeof window.applySidebarRoles==='function') window.applySidebarRoles(); }catch(e){}
+        setTimeout(function(){ try{ if(typeof window.loadAndMergeACM==='function') window.loadAndMergeACM(); }catch(e){}}, 600);
         log('ok','UPC cache login',''+cachedUser2.username);
         return true;
       }
@@ -21147,7 +21606,7 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
 
 <!-- ═══════════════════════════════════════════════════════════════════════
      UP ERP v14 PATCH - ACCESS_CONTROL_MASTER Integration
-     Purpose : Read ACCESS_CONTROL_MASTER (headerRow=3) from UP_SYSTEM_MASTER
+     Purpose : Read ACCESS_CONTROL_MASTER (headerRow=1) from UP_SYSTEM_MASTER
                during every Sync Now, then merge:
                  1. tab-level module flags  (dashboard, printing, … maintenance)
                  2. maintenance action flags (canCreateMaintReq, canAcceptMaintReq)
@@ -21161,7 +21620,7 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
   'use strict';
 
   // -- 1. ACM column name normaliser ---------------------------------------
-  // ACCESS_CONTROL_MASTER header row 3 has columns like:
+  // ACCESS_CONTROL_MASTER header row 1 has columns like:
   //   USERNAME | DASHBOARD | PRINTING | LAMINATION | SLITTING | BAG_MAKING |
   //   MAINTENANCE | DOWNTIME | INK | DISPATCH | QUALITY | WIP | PLANNING |
   //   SETTINGS | REPORTS | FG_STOCK | JOB_PROGRESS | EXECUTIVE |
@@ -21242,7 +21701,7 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
         console.warn('[ERP-ACM] readTab not available - skipping ACM merge');
         return;
       }
-      var rows = await readTab('SYSTEM_MASTER', 'ACCESS_CONTROL_MASTER', 3);
+      var rows = await readTab('SYSTEM_MASTER', 'ACCESS_CONTROL_MASTER', 1);
       if(!rows || !rows.length){
         console.warn('[ERP-ACM] ACCESS_CONTROL_MASTER returned 0 rows');
         return;
@@ -21290,6 +21749,12 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
         setTimeout(function(){ try{ if(typeof window.applySidebarRoles==='function') window.applySidebarRoles(); }catch(e){}}, 800);
       }
 
+      // Cache ACM data in localStorage so it's available instantly on next page load
+      try{
+        localStorage.setItem('up_acm_cache_v1', JSON.stringify(acmMap));
+        localStorage.setItem('up_acm_cache_ts', Date.now().toString());
+      }catch(e){}
+
       if(typeof debugLog === 'function')
         debugLog('ok', 'ACCESS_CONTROL_MASTER merged', Object.keys(acmMap).length + ' ACM user rows applied');
 
@@ -21299,6 +21764,39 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
       else console.warn('[ERP-ACM] ACM load error:', e.message);
     }
   }
+
+  // -- 3b. Restore ACM from localStorage cache (instant, no network) --------
+  function restoreACMFromCache(){
+    try{
+      var ts  = parseInt(localStorage.getItem('up_acm_cache_ts') || '0', 10);
+      var age = Date.now() - ts;
+      // Use cache if it's less than 8 hours old
+      if(age > 24 * 60 * 60 * 1000) return false; // 24h cache — covers daily users
+      var raw = localStorage.getItem('up_acm_cache_v1');
+      if(!raw) return false;
+      var acmMap = JSON.parse(raw);
+      if(!acmMap || typeof acmMap !== 'object') return false;
+      APP.__acmMap = acmMap;
+      // Apply cached ACM to current user immediately (no network call)
+      if(APP.currentUser){
+        var ck = String(APP.currentUser.username || '').trim().toLowerCase();
+        if(acmMap[ck]){
+          mergeACMIntoUser(APP.currentUser, acmMap[ck]);
+          // Apply sidebar immediately from cache
+          setTimeout(function(){
+            try{ if(typeof window.applySidebarRoles === 'function') window.applySidebarRoles(); }catch(e){}
+          }, 50);
+          if(typeof debugLog === 'function')
+            debugLog('ok', 'ACM restored from cache', ck + ' — age: ' + Math.round(age/60000) + 'm');
+          return true;
+        }
+      }
+      return false;
+    }catch(e){
+      return false;
+    }
+  }
+  window.restoreACMFromCache = restoreACMFromCache;
 
   // -- 4. Hook into syncLiveV4 - run ACM merge right after PASSWORD_MASTER -
   // We wrap the global syncLiveV4 function. The hook fires once per Sync Now.
@@ -21343,6 +21841,13 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
     applyACMHook();
     // Expose for manual trigger (Settings → Debug console)
     window.loadAndMergeACM = loadAndMergeACM;
+    // Restore ACM from localStorage cache immediately (before network call)
+    // This ensures sidebar shows correct tabs on page load/login instantly
+    setTimeout(function(){
+      if(APP && APP.currentUser && !APP.currentUser.modules){
+        restoreACMFromCache();
+      }
+    }, 300);
   }
 
   if(document.readyState === 'loading'){
@@ -22535,7 +23040,11 @@ function upcHookLogin(){
         if(typeof toast==='function') toast('Offline mode - showing cached data. Sync when online.','info');
         if(cachedUser.role==='MAIN_ADMIN') upcStartBackupScheduler();
         upcStartPeriodicSave();
+        // ACM: restore from cache first (instant), then refresh async
+        try{ if(typeof window.restoreACMFromCache==='function') window.restoreACMFromCache(); }catch(e){}
         try{ if(typeof window.applySidebarRoles==='function') window.applySidebarRoles(); }catch(e){}
+        // Async fresh ACM load in background
+        setTimeout(function(){ try{ if(typeof window.loadAndMergeACM==='function') window.loadAndMergeACM(); }catch(e){}}, 500);
         // Save session for reload recovery
         try{
           localStorage.setItem('up_current_user', JSON.stringify({
@@ -22580,7 +23089,11 @@ function upcHookLogin(){
         if(typeof toast==='function') toast('Opened from cache. Click 🔄 Sync Now for latest data.','success');
         if(cachedUser2.role==='MAIN_ADMIN') upcStartBackupScheduler();
         upcStartPeriodicSave();
+        // ACM: restore from cache first (instant), then refresh async
+        try{ if(typeof window.restoreACMFromCache==='function') window.restoreACMFromCache(); }catch(e){}
         try{ if(typeof window.applySidebarRoles==='function') window.applySidebarRoles(); }catch(e){}
+        // Async fresh ACM load in background
+        setTimeout(function(){ try{ if(typeof window.loadAndMergeACM==='function') window.loadAndMergeACM(); }catch(e){}}, 500);
         // Save session for reload recovery
         try{
           localStorage.setItem('up_current_user', JSON.stringify({
