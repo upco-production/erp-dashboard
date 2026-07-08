@@ -602,23 +602,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div class="login-error" id="login-error">Invalid username or password</div>
     <button class="login-btn" onclick="window.doLogin()">Login</button>
 
-    <div id="login-url-section" style="margin-top:12px">
-      <div style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:6px" onclick="(function(){var s=document.getElementById('login-url-fields');s.style.display=s.style.display==='none'?'block':'none'})()">
-        <span style="font-size:10px;color:var(--text3)">⚙ Apps Script URL</span>
-        <span id="login-url-status" style="font-size:10px;padding:1px 6px;border-radius:8px;background:rgba(57,208,216,.1);color:var(--cyan);border:1px solid rgba(57,208,216,.2)">auto</span>
-      </div>
-      <div id="login-url-fields" style="display:none">
-        <input type="text" id="login-script-url" placeholder="https://script.google.com/macros/s/.../exec"
-          style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:11px;font-family:monospace;outline:none;margin-bottom:6px"
-          onfocus="this.style.borderColor='var(--cyan2)'" onblur="this.style.borderColor='var(--border)'"
-          oninput="upSaveLoginUrl(this.value)">
-        <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Apni deployed Apps Script URL yahan paste karo</div>
-        <button onclick="upSaveLoginUrl(document.getElementById('login-script-url').value);if(typeof preLoginSyncDiagnostics==='function') preLoginSyncDiagnostics();"
-          style="width:100%;padding:6px;background:rgba(31,111,235,.15);border:1px solid rgba(31,111,235,.3);border-radius:6px;color:var(--cyan);font-size:11px;cursor:pointer">
-          💾 Save & Test Connection
-        </button>
-      </div>
-    </div>
+
     <div id="offline-login-hint" style="margin-top:12px;padding:8px 10px;border-radius:8px;background:rgba(63,185,80,.08);border:1px solid rgba(63,185,80,.25);font-size:11px;color:#8b949e;display:none">
       📡 No internet? If you have logged in on this device before, your account still works offline using locally cached data. It will re-sync automatically once you're back online.
     </div>
@@ -1192,6 +1176,8 @@ function doLogin() {
   }
   APP.currentUser = setCurrentUser(user);
   try{ localStorage.setItem('up_current_user', JSON.stringify({username:user.username,password:user.password,name:user.name,role:user.role,dept:user.dept||'',status:user.status||'ACTIVE',_savedAt:Date.now()})); }catch(e){}
+  // Restore ACM from cache BEFORE showing UI — sidebar correct on first render
+  try{ if(typeof restoreACMFromCache==='function') restoreACMFromCache(); }catch(e){}
   document.getElementById('login-page').style.display='none';
   document.getElementById('main-app').style.display='flex';
   document.getElementById('sidebar-username').textContent=user.name;
@@ -1201,6 +1187,7 @@ function doLogin() {
   // Build month chips
   buildMonthChips();
   startClock();
+  if(typeof applySidebarRoles==='function') applySidebarRoles();
   navigate('dashboard');
   if(typeof applyLogos==='function') applyLogos();
   toast('Login successful. Welcome, '+user.name+'!','success');
@@ -3821,8 +3808,11 @@ window.syncWIPMaster = async function(opts){
 
     // PRIMARY: call Apps Script DIRECTLY (bypasses Cloudflare proxy cache)
     // Uses the actual deployed Apps Script URL from Settings
+    // Known Apps Script URL — used if user hasn't configured it in Settings
+    const _KNOWN_AS_URL = 'https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec';
     const directUrl = localStorage.getItem('up_appScriptUrl') ||
-                      (APP&&APP.settings&&APP.settings.appScriptUrl) || '';
+                      (APP&&APP.settings&&APP.settings.appScriptUrl) ||
+                      _KNOWN_AS_URL;
     if(directUrl && directUrl.includes('script.google.com')){
       try{
         const u = new URL(directUrl);
@@ -4104,7 +4094,11 @@ function wipOpenDetail(idx, orderEnc){
 window.renderWIPSummary = function(container){
   // Sync WIP + Planning if empty
   const planRows = (APP.planningData||[]).map(normPlanRow).filter(jptValidOrder);
-  const wipRows  = (APP.wipData||[]).map(normWIPRow).filter(r=>r.order&&r.order!=='0');
+  const wipRows  = (APP.wipData||[]).map(normWIPRow).filter(r=>{
+    if(!r.order||r.order==='0') return false;
+    const st = (r.status||'').toUpperCase().replace(/\s+/g,' ').trim();
+    return st!=='CANCELLED'&&st!=='REJECTED'; // show all except cancelled
+  });
 
   // Header with sync button
   const syncBar = `
@@ -4153,7 +4147,12 @@ window.renderWIPSummary = function(container){
 
   // Draw WIP chart after render
   setTimeout(function(){
-    try{ if(typeof jptDrawWIPChart==='function') jptDrawWIPChart(planRows); }catch(e){}
+    try{
+      if(typeof jptDrawWIPChart==='function'){
+        // window._wipChartRows was set by jptRenderWIP — same rows as KPI cards
+        jptDrawWIPChart();
+      }
+    }catch(e){}
   }, 120);
 };
 
@@ -5231,12 +5230,18 @@ function jptRenderWIP(allPlanRows){
   // Accept all meaningful statuses from WIP_ORDER_LINK (OPEN, IN PROGRESS, ON HOLD, COMPLETED)
   // Exclude only CLOSED/CANCELLED/DISPATCHED completely-done orders
   // Exclude closed/completed/cancelled orders — only show active WIP
-  const _WIP_EXCLUDE_STATUS = new Set(['CLOSED','COMPLETED','CANCELLED','REJECTED','DISPATCHED']);
+  // Show ALL orders (Option A) — no status filter
+  // Only exclude truly invalid rows (no order number)
+  // Mark duplicate order numbers visually
+  const _orderCount = {};
+  raw.map(normWIPRow).forEach(r=>{ if(r.order&&cleanOrd(r.order)!=='0'){ _orderCount[cleanOrd(r.order)]=(_orderCount[cleanOrd(r.order)]||0)+1; } });
   const rows=raw.map(normWIPRow).filter(r=>{
     if(!r.order||cleanOrd(r.order)==='0') return false;
+    // Only exclude truly closed/cancelled
     const st = String(r.status||'').toUpperCase().replace(/\s+/g,' ').trim();
-    if(_WIP_EXCLUDE_STATUS.has(st)) return false;
-    return true;  // show OPEN, IN PROGRESS, ON HOLD, COMPLETED, DISPATCHED etc.
+    if(st==='CANCELLED'||st==='REJECTED') return false;
+    r._isDuplicate = _orderCount[cleanOrd(r.order)] > 1;
+    return true;  // show ALL orders including COMPLETED, IN FGPATCHED etc.
   });
 
   if(!rows.length){
@@ -5247,7 +5252,10 @@ function jptRenderWIP(allPlanRows){
     <button id="jpt-refresh-btn" class="btn btn-primary" onclick="jptForceRefresh()">🔄 Sync Now</button>`;
   }
 
-  // -- KPI aggregates ----------------------------------------------------
+  // Save filtered rows globally so jptDrawWIPChart uses SAME data as KPI cards
+  window._wipChartRows = rows;
+
+  // -- KPI aggregates (from same filtered+deduped rows) --------------------
   const totalWIPKg = rows.reduce((a,r)=>a+r.totalWIP,0);
   const printWIP   = rows.reduce((a,r)=>a+r.printBalance,0);
   const lamWIP     = rows.reduce((a,r)=>a+r.lamBalance,0);
@@ -5310,12 +5318,7 @@ function jptRenderWIP(allPlanRows){
         <div style="font-size:22px;font-weight:800;color:var(--yellow);font-family:'Rajdhani',sans-serif;line-height:1">${big(slitWIP)}</div>
         <div style="font-size:9px;color:var(--text3);margin-top:3px">${ordsSlit} orders · awaiting BM/Disp</div>
       </div>
-      <div style="background:var(--bg2);border:1px solid var(--border);border-top:3px solid var(--green);border-radius:8px;padding:10px 12px">
-        <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">👜 Bag WIP</div>
-        <div style="font-size:22px;font-weight:800;color:var(--green);font-family:'Rajdhani',sans-serif;line-height:1">${big(bagWIP)}</div>
-        <div style="font-size:9px;color:var(--text3);margin-top:3px">${ordsBag} orders · awaiting Dispatch</div>
-      </div>
-    </div>
+          </div>
 
     <!-- SECTION 2 - ORDER STATUS + STAGE DISTRIBUTION -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
@@ -5432,7 +5435,7 @@ function jptRenderWIP(allPlanRows){
               data-status="${String(r.status||'').toUpperCase().replace(/\s+/g,' ')}"
               data-search="${safeText(r.order)} ${safeText(r.matDesc)} ${safeText(r.material)}".toLowerCase()
               style="cursor:pointer;border-left:3px solid ${sc}" onclick="jptWIPDrillDown('${key}',${i})" title="Click to expand">
-              <td style="font-family:monospace;font-size:10px;color:var(--cyan);font-weight:600">${safeText(r.order)}</td>
+              <td style="font-family:monospace;font-size:10px;color:var(--cyan);font-weight:600">${safeText(r.order)}${r._isDuplicate?'<span style="margin-left:4px;padding:1px 5px;border-radius:4px;background:rgba(248,81,73,.15);color:#f85149;font-size:8px;font-weight:700;font-family:sans-serif">DUP</span>':''}</td>
               <td style="font-family:monospace;font-size:10px;color:var(--text3)">${fgMaterial}</td>
               <td style="font-size:9px;font-weight:700;color:${jptJobTypeBadgeCol(jobType)};text-align:center">${jobType||'-'}</td>
               <td style="font-weight:600;min-width:160px;word-break:break-word;white-space:normal;max-width:200px">${safeText(r.matDesc)||'-'}</td>
@@ -5469,154 +5472,76 @@ function jptRenderWIP(allPlanRows){
 }
 
 // -- WIP Charts ------------------------------------------------------------
-function jptDrawWIPChart(allPlanRows){
-  const raw=APP.wipData||[];
-  // Same filter as WIP tab - use ORDER_STATUS not CURRENT_STAGE
-  const _WIP_ST=new Set(['IN PROGRESS','IN PROGESS','ON HOLD','HOLD','COMPLETED']);
-  const rows=raw.map(normWIPRow).filter(r=>{
-    if(!r.order||r.order==='0') return false;
-    const st=String(r.status||'').toUpperCase().replace(/\s+/g,' ').trim();
-    return _WIP_ST.has(st);
-  });
-  const opts={responsive:true,maintainAspectRatio:false,
-    plugins:{legend:{display:false},upValueLabels:{unit:''}},
-    scales:{x:{ticks:{color:'#6e7681',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}},
-            y:{ticks:{color:'#6e7681',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'}}}};
-  // WIP KG bar
-  const wipKg=[rows.reduce((a,r)=>a+r.printBalance,0),rows.reduce((a,r)=>a+r.lamBalance,0),rows.reduce((a,r)=>a+r.slitBalance,0)];
-  const wipT=wipKg.map(v=>parseFloat((v/1000).toFixed(2)));
-  if(APP.chartInstances.jptWipBar) try{APP.chartInstances.jptWipBar.destroy();}catch(e){}
-  const c1=document.getElementById('jpt-wip-bar-chart');
-  if(c1) APP.chartInstances.jptWipBar=new Chart(c1,{type:'bar',data:{
-    labels:['Printed WIP','Laminated WIP','Slitted WIP'],
-    datasets:[{label:'WIP Tons',data:wipT,backgroundColor:['#58a6ff','#f0883e','#e3b341'],borderRadius:6}]
-  },options:{...opts,plugins:{...opts.plugins,upValueLabels:{unit:'T'}}}});
-  // Stage orders bar
-  const stageCount={};
-  rows.forEach(r=>{ const s=r.currentStage||'UNKNOWN'; stageCount[s]=(stageCount[s]||0)+1; });
-  const sLabels=Object.keys(stageCount).sort((a,b)=>stageCount[b]-stageCount[a]).slice(0,6);
-  const sBg=['#3fb950','#7ee787','#f0883e','#e3b341','#58a6ff','#8b949e'];
-  if(APP.chartInstances.jptWipOrd) try{APP.chartInstances.jptWipOrd.destroy();}catch(e){}
-  const c2=document.getElementById('jpt-wip-orders-chart');
-  if(c2) APP.chartInstances.jptWipOrd=new Chart(c2,{type:'bar',data:{
-    labels:sLabels,datasets:[{label:'Orders',data:sLabels.map(l=>stageCount[l]),backgroundColor:sBg,borderRadius:6}]
-  },options:{...opts,plugins:{...opts.plugins,upValueLabels:{unit:''}}}} );
-}
-// -- WIP filter + export ---------------------------------------------------
-window.wipApplyFilter = function(){
-  const stage =document.getElementById('wip-stage-filter')?.value||'';
-  const status=document.getElementById('wip-status-filter')?.value?.toUpperCase().replace(/\s+/g,' ')||'';
-  const q     =(document.getElementById('wip-search')?.value||'').toLowerCase().trim();
-  document.querySelectorAll('#wip-table .wip-row').forEach(tr=>{
-    const hasPrint  =tr.getAttribute('data-print')==='true';
-    const hasLam    =tr.getAttribute('data-lam')==='true';
-    const hasSlit   =tr.getAttribute('data-slit')==='true';
-    const hasVar    =tr.getAttribute('data-variance')==='true';
-    const rowStatus =(tr.getAttribute('data-status')||'');
-    const rowSearch =(tr.getAttribute('data-search')||'');
-    let show=true;
-    if(stage==='print'&&!hasPrint) show=false;
-    if(stage==='lam'&&!hasLam)    show=false;
-    if(stage==='slit'&&!hasSlit)  show=false;
-    if(stage==='variance'&&!hasVar) show=false;
-    if(status&&rowStatus!==status) show=false;
-    if(q&&!rowSearch.includes(q))  show=false;
-    tr.style.display=show?'':'none';
-    const drill=tr.nextElementSibling;
-    if(drill&&!show) drill.style.display='none';
-  });
-};
-window.wipClearFilter = function(){
-  ['wip-stage-filter','wip-status-filter'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  const s=document.getElementById('wip-search');if(s)s.value='';
-  document.querySelectorAll('#wip-table .wip-row').forEach(tr=>{ tr.style.display=''; });
-};
-window.wipExportExcel = function(){
-  const rows=[];
-  document.querySelectorAll('#wip-table .wip-row').forEach(tr=>{
-    if(tr.style.display==='none') return;
-    const cells=[...tr.querySelectorAll('td')].map(td=>td.textContent.trim());
-    rows.push(cells);
-  });
-  if(!rows.length){ toast('No rows to export','warning'); return; }
-  const headers=['SFG Order','FG Material','Description','Order Qty KG','Status','Current Stage','Printed WIP KG','Lam WIP KG','Slitted WIP KG','Total WIP KG','Variance %'];
-  const csv=[headers,...rows].map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
-  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url; a.download='UP_WIP_'+new Date().toISOString().slice(0,10)+'.csv';
-  a.click(); URL.revokeObjectURL(url);
-  toast('WIP data exported to CSV','success');
-};
-window.jptWIPDrillDown = function(keyEnc, idx){
-  const drillRow=document.getElementById('jpt-wip-drill-'+idx);
-  const contentEl=document.getElementById('jpt-wip-drill-content-'+idx);
-  if(!drillRow||!contentEl) return;
-  if(drillRow.style.display!=='none'){ drillRow.style.display='none'; return; }
-  drillRow.style.display='table-row';
-  let key; try{key=JSON.parse(decodeURIComponent(keyEnc));}catch(e){return;}
-  const prodRows=(APP.productionData||[]).filter(r=>{
-    const rSFG=String(r.sapSFG||r.SAP_SFG_NO||'').trim();
-    const rPO =String(r.sapPO ||r.SAP_PO  ||'').trim();
-    const rJob=String(r.job   ||r.JOB_NAME||'').trim();
-    if(key.sfgOrder&&rSFG&&rSFG===key.sfgOrder.trim()) return true;
-    if(key.fgOrder &&rPO &&rPO ===key.fgOrder.trim())  return true;
-    if(key.sfgCode&&(rSFG.includes(key.sfgCode)||rJob.includes(key.sfgCode))) return true;
-    if(key.fgCode &&(rPO.includes(key.fgCode) ||rJob.includes(key.fgCode)))  return true;
-    return false;
-  });
-  const planRow=(APP.planningData||[]).map(normPlanRow).filter(jptValidOrder).find(p=>
-    (key.sfgOrder&&p.sfgOrder&&p.sfgOrder===key.sfgOrder)||
-    (key.fgOrder &&p.fgOrder &&p.fgOrder ===key.fgOrder)||
-    (key.sfgCode &&p.sfgCode &&p.sfgCode ===key.sfgCode)||
-    (key.fgCode  &&p.fgCode  &&p.fgCode  ===key.fgCode)
-  );
-  const lastStg=planRow?jptLastStage(planRow):{stage:'-',qty:0,unit:'',color:'var(--text3)'};
-  if(!prodRows.length){
-    contentEl.innerHTML=`<div style="color:var(--text3);padding:10px;font-size:12px">No production records found for this order in UP_PRODUCTION_MASTER. SAP SFG No / SAP PO must match exactly.</div>`;
-    return;
-  }
-  const depts=['Printing','Lamination','Slitting','Bag Making'];
-  const deptSummary=depts.map(dept=>{
-    const dr=prodRows.filter(r=>r.dept===dept); if(!dr.length) return null;
-    const isBag=dept==='Bag Making';
-    const prodKg=dr.reduce((a,r)=>a+(+(r.productionKg||r.production||0)),0);
-    const waste  =dr.reduce((a,r)=>a+(+(r.waste||0)),0);
-    const dates=[...new Set(dr.map(r=>r.date||'').filter(Boolean))].sort();
-    return {dept,rows:dr.length,prodKg,waste,isBag,firstDate:dates[0]||'-',lastDate:dates[dates.length-1]||'-'};
-  }).filter(Boolean);
-  contentEl.innerHTML=`
-    <div style="background:var(--bg3);border-radius:8px;padding:10px 14px;margin-bottom:10px;border-left:3px solid var(--cyan)">
-      <div style="font-weight:700;font-size:13px;color:var(--text);margin-bottom:4px">${safeText(planRow?planRow.matDesc:key.matDesc||'')}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--text2)">
-        <span>SFG: <b style="color:var(--cyan)">${safeText(key.sfgOrder||'-')}</b></span>
-        <span>FG: <b style="color:var(--orange)">${safeText(key.fgOrder||'-')}</b></span>
-        <span style="color:${lastStg.color}">Last Stage: <b>${lastStg.stage}${lastStg.qty>0?' - '+lastStg.qty.toFixed(1)+' '+lastStg.unit:''}</b></span>
-      </div>
-    </div>
-    <table style="font-size:11px;width:100%">
-      <thead style="background:var(--bg3)"><tr>
-        <th>Department</th><th>Records</th><th>Date Range</th>
-        <th>Actual Prod KG</th><th>Waste KG</th>
-        <th>Details</th>
-      </tr></thead>
-      <tbody>
-        ${deptSummary.map(d=>`<tr>
-          <td><span class="dept-dot" style="background:${deptColor(d.dept)}"></span><b>${d.dept}</b></td>
-          <td>${d.rows}</td>
-          <td style="font-size:10px;color:var(--text3)">${fmtDDMMYYYY(d.firstDate)||'-'} - ${fmtDDMMYYYY(d.lastDate)||'-'}</td>
-          <td style="font-weight:600;color:var(--cyan)">${d.prodKg.toFixed(1)} KG</td>
-          <td style="color:${d.waste>0?'var(--red)':'var(--text3)'}">${d.waste.toFixed(1)} KG</td>
-          <td><button class="btn btn-primary btn-sm" onclick="jptDrillDownDept('${keyEnc}','${encodeURIComponent(d.dept)}','wip_${idx}')">Details →</button></td>
-        </tr>`).join('')}
-      </tbody>
-    </table>
-    <div id="jpt-dept-detail-wip_${idx}" style="margin-top:8px"></div>`;
-};
+function jptDrawWIPChart(rows){
+  // Use window._wipChartRows — same rows as KPI cards (all orders)
+  const wipRows = window._wipChartRows || rows || [];
 
-// ══════════════════════════════════════════════════════════════════════════
-// END WIP & FG STOCK TAB
-// ══════════════════════════════════════════════════════════════════════════
+  const opts = {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false}, upValueLabels:{unit:''} },
+    scales:{
+      x:{ticks:{color:'#6e7681',font:{size:10}}, grid:{color:'rgba(255,255,255,.04)'}},
+      y:{ticks:{color:'#6e7681',font:{size:10}}, grid:{color:'rgba(255,255,255,.04)'}}
+    }
+  };
+
+  // ── Chart 1: WIP by production column (Printing Balance / Lam Balance / Slit Balance) ──
+  const printBal = wipRows.reduce((a,r)=>a+r.printBalance,0);
+  const lamBal   = wipRows.reduce((a,r)=>a+r.lamBalance,0);
+  const slitBal  = wipRows.reduce((a,r)=>a+r.slitBalance,0);
+  const wipT = [printBal/1000, lamBal/1000, slitBal/1000].map(v=>+v.toFixed(2));
+
+  if(APP.chartInstances.jptWipBar) try{APP.chartInstances.jptWipBar.destroy();}catch(e){}
+  const c1 = document.getElementById('jpt-wip-bar-chart');
+  if(c1) APP.chartInstances.jptWipBar = new Chart(c1, {
+    type:'bar',
+    data:{
+      labels:['Print Balance','Lam Balance','Slit Balance'],
+      datasets:[{
+        label:'WIP (T)',
+        data: wipT,
+        backgroundColor:['#22d3ee','#a78bfa','#34d399'],
+        borderRadius:6
+      }]
+    },
+    options:{...opts, plugins:{...opts.plugins, upValueLabels:{unit:'T'}}}
+  });
+
+  // ── Chart 2: Orders by CURRENT_STAGE ──
+  const stageCount = {};
+  wipRows.forEach(r=>{
+    const s = r.currentStage || 'UNKNOWN';
+    stageCount[s] = (stageCount[s]||0)+1;
+  });
+  const stageColors = {
+    'DISPATCH READY':'#3fb950',
+    'LAMINATED':'#a78bfa',
+    'SLITTED':'#34d399',
+    'BAG MAKING':'#fb923c',
+    'PRINTED':'#22d3ee',
+    'NOT STARTED':'#6b7280',
+    'UNKNOWN':'#8b949e'
+  };
+  const sLabels = Object.keys(stageCount).sort((a,b)=>stageCount[b]-stageCount[a]);
+  const sBg = sLabels.map(l=>stageColors[l]||'#58a6ff');
+
+  if(APP.chartInstances.jptWipOrd) try{APP.chartInstances.jptWipOrd.destroy();}catch(e){}
+  const c2 = document.getElementById('jpt-wip-orders-chart');
+  if(c2) APP.chartInstances.jptWipOrd = new Chart(c2, {
+    type:'bar',
+    data:{
+      labels: sLabels,
+      datasets:[{
+        label:'Orders',
+        data: sLabels.map(l=>stageCount[l]),
+        backgroundColor: sBg,
+        borderRadius:6
+      }]
+    },
+    options:{...opts, plugins:{...opts.plugins, upValueLabels:{unit:''}}}
+  });
+}
+
 
 function jptCanonStatus(p){
   const up=String(p.jobStatus||'').trim().toUpperCase().replace(/\s+/g,' ');
@@ -12256,8 +12181,10 @@ syncOneSource = async function(key){
       let _fetched = false;
 
       // Try 1: Direct Apps Script URL (user-configured, bypasses Cloudflare proxy)
+      const _KNOWN_AS_URL2 = 'https://script.google.com/macros/s/AKfycbxeLyxLK1I9wc022j5JU6pjrd9G360lC9Sd1jCWm5Plkh0qy2u99jO8b8D-RyjgRkMORw/exec';
       const _directUrl = localStorage.getItem('up_appScriptUrl') ||
-                         (APP&&APP.settings&&APP.settings.appScriptUrl) || '';
+                         (APP&&APP.settings&&APP.settings.appScriptUrl) ||
+                         _KNOWN_AS_URL2;
       if(_directUrl && _directUrl.includes('script.google.com')){
         try{
           const _u = new URL(_directUrl);
@@ -14354,7 +14281,14 @@ navigate = (function(orig){
   //  1. MAIN_ADMIN → always sees everything
   //  2. modules object (from ACCESS_CONTROL_MASTER) → use TRUE/FALSE per tab
   //  3. Tech/Incharge role fallback → only Dashboard, Downtime, Maintenance
-  window.applySidebarRoles = function(){
+  // Debounced sidebar apply — collapses rapid calls into one
+var _asrDebTimer = null;
+var _asrRealFn = null;
+window.applySidebarRoles = function(){
+  clearTimeout(_asrDebTimer);
+  _asrDebTimer = setTimeout(function(){ if(_asrRealFn) _asrRealFn(); }, 30);
+};
+_asrRealFn = function(){
     var user    = (typeof APP !== 'undefined') ? APP.currentUser : null;
     if (!user) return;
 
@@ -15195,6 +15129,7 @@ window.renderDeptRows = function(data, dept){
 
   return rowsHTML + subtotalRow;
 };
+// end _asrRealFn
 
 // -------------------------------------------------------------
 // 9. Dept page: inject Shift Incharge filter + wire filterDeptTable
@@ -21701,7 +21636,7 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
         console.warn('[ERP-ACM] readTab not available - skipping ACM merge');
         return;
       }
-      var rows = await readTab('SYSTEM_MASTER', 'ACCESS_CONTROL_MASTER', 1);
+      var rows = await readTab('SYSTEM_MASTER', 'ACCESS_CONTROL_MASTER', 3, 5);
       if(!rows || !rows.length){
         console.warn('[ERP-ACM] ACCESS_CONTROL_MASTER returned 0 rows');
         return;
@@ -21754,6 +21689,15 @@ log('ok','UPC v2.0 initialized','Cache loaded at startup - offline-safe, Sync No
         localStorage.setItem('up_acm_cache_v1', JSON.stringify(acmMap));
         localStorage.setItem('up_acm_cache_ts', Date.now().toString());
       }catch(e){}
+
+      // Apply fresh ACM to current user and update sidebar immediately
+      if(window.APP && APP.currentUser){
+        var _ck = String(APP.currentUser.username||'').trim().toLowerCase();
+        if(acmMap[_ck]){
+          mergeACMIntoUser(APP.currentUser, acmMap[_ck]);
+          try{ if(typeof window.applySidebarRoles==='function') window.applySidebarRoles(); }catch(e){}
+        }
+      }
 
       if(typeof debugLog === 'function')
         debugLog('ok', 'ACCESS_CONTROL_MASTER merged', Object.keys(acmMap).length + ' ACM user rows applied');
