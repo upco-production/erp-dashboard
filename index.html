@@ -1066,17 +1066,25 @@ var APP = {
   ], // live users from UP_SYSTEM_MASTER are appended to this list once synced
   
   machines: [
-    {code:'ROTO-01',name:'ROTO GRAVURE 01',dept:'Printing',type:'Printing',capacity:'24000',unit:'meters',speed:'500 m/min',standardSpeed:500,status:'ACTIVE'},
-    {code:'ROTO-02',name:'ROTO GRAVURE 02',dept:'Printing',type:'Printing',capacity:'24000',unit:'meters',speed:'500 m/min',standardSpeed:500,status:'ACTIVE'},
-    {code:'SS-01',name:'SUPER SIMPLEX 01',dept:'Lamination',type:'Lamination',capacity:'18000',unit:'meters',speed:'300 m/min',standardSpeed:300,status:'ACTIVE'},
-    {code:'SS-02',name:'SUPER SIMPLEX 02',dept:'Lamination',type:'Lamination',capacity:'18000',unit:'meters',speed:'300 m/min',standardSpeed:300,status:'ACTIVE'},
-    {code:'COMEXI',name:'COMEXI',dept:'Lamination',type:'Lamination',capacity:'18000',unit:'meters',speed:'300 m/min',standardSpeed:300,status:'ACTIVE'},
-    {code:'S-COMBI',name:'SUPER COMBI',dept:'Lamination',type:'Lamination',capacity:'18000',unit:'meters',speed:'300 m/min',standardSpeed:300,status:'ACTIVE'},
-    {code:'SM-01',name:'COMEXI 1',dept:'Slitting',type:'Slitting',capacity:'18000',unit:'meters',speed:'300 m/min',standardSpeed:300,status:'ACTIVE'},
-    {code:'SM-02',name:'COMEXI 2',dept:'Slitting',type:'Slitting',capacity:'18000',unit:'meters',speed:'300 m/min',standardSpeed:300,status:'ACTIVE'},
-    {code:'SM-03',name:'WEB CONTROL',dept:'Slitting',type:'Slitting',capacity:'18000',unit:'meters',speed:'300 m/min',standardSpeed:300,status:'ACTIVE'},
-    {code:'SM-04',name:'YODEN',dept:'Slitting',type:'Slitting',capacity:'18000',unit:'meters',speed:'300 m/min',standardSpeed:300,status:'ACTIVE'},
-    // BG-01 to BG-05 removed - Bag Making machines come from live production data only.
+    // ── Printing ──────────────────────────────────────────────────────────────────
+    {code:'ROTO-01',name:'ROTO-01',     dept:'Printing',  type:'Printing',  unit:'meters',standardSpeed:400,status:'ACTIVE'},
+    {code:'ROTO-02',name:'ROTO-02',     dept:'Printing',  type:'Printing',  unit:'meters',standardSpeed:400,status:'ACTIVE'},
+    // ── Lamination ────────────────────────────────────────────────────────────────
+    {code:'SS-01',  name:'SS-01',       dept:'Lamination',type:'Lamination',unit:'meters',standardSpeed:350,status:'ACTIVE'},
+    {code:'SS-02',  name:'SS-02',       dept:'Lamination',type:'Lamination',unit:'meters',standardSpeed:300,status:'ACTIVE'},
+    {code:'COMEXI', name:'COMEXI',      dept:'Lamination',type:'Lamination',unit:'meters',standardSpeed:300,status:'ACTIVE'},
+    {code:'S-COMBI',name:'S-COMBI',     dept:'Lamination',type:'Lamination',unit:'meters',standardSpeed:250,status:'ACTIVE'},
+    // ── Slitting ──────────────────────────────────────────────────────────────────
+    {code:'SM-01',  name:'SM-01',       dept:'Slitting',  type:'Slitting',  unit:'meters',standardSpeed:400,status:'ACTIVE'},
+    {code:'SM-02',  name:'SM-02',       dept:'Slitting',  type:'Slitting',  unit:'meters',standardSpeed:500,status:'ACTIVE'},
+    {code:'SM-03',  name:'SM-03',       dept:'Slitting',  type:'Slitting',  unit:'meters',standardSpeed:500,status:'ACTIVE'},
+    {code:'SM-04',  name:'SM-04',       dept:'Slitting',  type:'Slitting',  unit:'meters',standardSpeed:500,status:'ACTIVE'},
+    // ── Bag Making ────────────────────────────────────────────────────────────────
+    {code:'BOX POUCH',    name:'BOX POUCH',     dept:'Bag Making',type:'Bag Making',unit:'pcs',standardSpeed:60, status:'ACTIVE'},
+    {code:'CENTER SEAL',  name:'CENTER SEAL',   dept:'Bag Making',type:'Bag Making',unit:'pcs',standardSpeed:100,status:'ACTIVE'},
+    {code:'DIAPER',       name:'DIAPER',         dept:'Bag Making',type:'Bag Making',unit:'pcs',standardSpeed:50, status:'ACTIVE'},
+    {code:'NEW STD.POUCH',name:'NEW STD.POUCH', dept:'Bag Making',type:'Bag Making',unit:'pcs',standardSpeed:60, status:'ACTIVE'},
+    {code:'OLD STD.POUCH',name:'OLD STD.POUCH', dept:'Bag Making',type:'Bag Making',unit:'pcs',standardSpeed:50, status:'ACTIVE'},
   ],
 
   // Admin-adjustable EE/OEE calculation settings (multiplier/divisor on running
@@ -2752,128 +2760,150 @@ window.renderInkMatList = function() {
 // ═══════════════════════════════════════════════════════════════════════
 function renderWeeklyReport(container) {
   if (!window.isMainAdmin || !window.isMainAdmin()) {
-    container.innerHTML = '<div style="text-align:center;padding:60px 20px"><div style="font-size:48px">🔒</div><div style="font-size:14px;font-weight:700;color:var(--red);margin-top:12px">MAIN_ADMIN Access Only</div></div>';
+    container.innerHTML = '<div style="text-align:center;padding:80px 20px"><div style="font-size:48px">🔒</div><div style="font-size:13px;font-weight:700;color:var(--red);margin-top:12px">MAIN_ADMIN Access Only</div></div>';
     return;
   }
 
   var today  = new Date();
-  var monday = new Date(today);
-  monday.setDate(today.getDate() - ((today.getDay()||7)-1));
+  var monday = new Date(today); monday.setDate(today.getDate()-((today.getDay()||7)-1));
   var sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
   var toISO  = function(d){ return d.toISOString().slice(0,10); };
 
+  // --- Storage for manual entries (persisted in session) ---
+  if(!window.pptxRemarks)   window.pptxRemarks  = {};
+  if(!window.pptxPlanKg)    window.pptxPlanKg   = {};
+  if(!window.pptxSpeedOverrides) window.pptxSpeedOverrides = {};
+
+  var depFactor = function(dept){
+    if(!dept) return 1;
+    var d=dept.toLowerCase();
+    if(d.includes('laminat')) return 0.75;
+    if(d.includes('slit'))    return 0.50;
+    if(d.includes('bag'))     return 0.75;
+    return 1.0;
+  };
+
+  var th = function(label, color, right){
+    var c = color||'var(--text3)';
+    var al = right ? 'text-align:right;' : '';
+    return '<th style="padding:7px 9px;'+al+'font-size:10px;font-weight:700;color:'+c+';white-space:nowrap;background:var(--bg3);border-bottom:2px solid var(--border);position:sticky;top:0;z-index:5">'+label+'</th>';
+  };
+
+  var fmt = function(v, dec){
+    if(v===null||v===undefined||isNaN(v)) return '—';
+    return dec ? (+v).toFixed(dec) : Math.round(+v).toLocaleString();
+  };
+
+  var colr = function(val, good, warn){
+    // Returns color: green if >=good, orange if >=warn, red otherwise
+    return val>=good ? 'var(--green)' : val>=warn ? 'var(--orange)' : 'var(--red)';
+  };
+
   container.innerHTML =
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">' +
+    // ── Page header ─────────────────────────────────────────────────
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;padding-bottom:10px;border-bottom:2px solid var(--border)">' +
       '<div>' +
-        '<div style="font-size:16px;font-weight:700;color:var(--text)">📊 PPTX Data — Printing Machine Performance</div>' +
-        '<div style="font-size:11px;color:var(--text3);margin-top:2px">Daily machine-wise data for Weekly Report generation. MAIN_ADMIN only.</div>' +
+        '<div style="font-size:16px;font-weight:800;color:var(--text)">📊 PPTX Data — Daily Production Meeting</div>' +
+        '<div style="font-size:11px;color:var(--text3);margin-top:3px">Machine-wise performance · All calculations auto · Remarks editable · MAIN_ADMIN only</div>' +
       '</div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
-        '<button onclick="window.pptxPreset(\'week\')" style="background:var(--bg3);border:1.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">This Week</button>' +
+        '<button onclick="window.pptxPreset(\'today\')"   style="background:var(--bg3);border:1.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Today</button>' +
+        '<button onclick="window.pptxPreset(\'week\')"    style="background:var(--bg3);border:1.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">This Week</button>' +
         '<button onclick="window.pptxPreset(\'lastweek\')" style="background:var(--bg3);border:1.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Last Week</button>' +
-        '<button onclick="window.pptxPreset(\'month\')" style="background:var(--bg3);border:1.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">This Month</button>' +
+        '<button onclick="window.pptxPreset(\'month\')"   style="background:var(--bg3);border:1.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">This Month</button>' +
         '<button onclick="window.exportPPTXcsv()" style="background:var(--green);color:#fff;border:none;padding:5px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">⬇ Export CSV</button>' +
       '</div>' +
     '</div>' +
 
-    // Date filters
-    '<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">' +
-      '<div style="display:flex;align-items:center;gap:8px">' +
-        '<label style="font-size:11px;font-weight:700;color:var(--text3)">FROM:</label>' +
-        '<input type="date" id="pptx-from" value="' + toISO(monday) + '" onchange="window.renderPPTXTable()" style="background:var(--bg3);border:1.5px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none">' +
-      '</div>' +
-      '<div style="display:flex;align-items:center;gap:8px">' +
-        '<label style="font-size:11px;font-weight:700;color:var(--text3)">TO:</label>' +
-        '<input type="date" id="pptx-to" value="' + toISO(sunday) + '" onchange="window.renderPPTXTable()" style="background:var(--bg3);border:1.5px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none">' +
-      '</div>' +
-      '<div style="display:flex;align-items:center;gap:8px">' +
-        '<label style="font-size:11px;font-weight:700;color:var(--text3)">DEPT:</label>' +
-        '<select id="pptx-dept" onchange="window.renderPPTXTable()" style="background:var(--bg3);border:1.5px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none">' +
-          '<option value="">All Departments</option>' +
-          '<option value="Printing" selected>Printing</option>' +
-          '<option value="Lamination">Lamination</option>' +
-          '<option value="Slitting">Slitting</option>' +
-          '<option value="Bag Making">Bag Making</option>' +
-        '</select>' +
-      '</div>' +
-      '<div style="display:flex;align-items:center;gap:8px">' +
-        '<label style="font-size:11px;font-weight:700;color:var(--text3)">MACHINE:</label>' +
-        '<select id="pptx-machine" onchange="window.renderPPTXTable()" style="background:var(--bg3);border:1.5px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none">' +
-          '<option value="">All Machines</option>' +
-        '</select>' +
-      '</div>' +
-      '<div id="pptx-summary" style="margin-left:auto;font-size:11px;color:var(--text3)"></div>' +
+    // ── Filters ─────────────────────────────────────────────────────
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;background:var(--bg2);padding:10px 14px;border-radius:10px;border:1.5px solid var(--border)">' +
+      '<label style="font-size:10px;font-weight:700;color:var(--text3)">FROM</label>' +
+      '<input type="date" id="pptx-from" value="' + toISO(monday) + '" onchange="window.renderPPTXTable()" style="background:var(--bg3);border:1.5px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:11px;outline:none">' +
+      '<label style="font-size:10px;font-weight:700;color:var(--text3)">TO</label>' +
+      '<input type="date" id="pptx-to" value="' + toISO(sunday) + '" onchange="window.renderPPTXTable()" style="background:var(--bg3);border:1.5px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:11px;outline:none">' +
+      '<div style="width:1px;height:24px;background:var(--border)"></div>' +
+      '<label style="font-size:10px;font-weight:700;color:var(--text3)">DEPT</label>' +
+      '<select id="pptx-dept" onchange="window.renderPPTXTable()" style="background:var(--bg3);border:1.5px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:11px;outline:none">' +
+        '<option value="">All Departments</option>' +
+        '<option value="Printing">Printing</option>' +
+        '<option value="Lamination">Lamination</option>' +
+        '<option value="Slitting">Slitting</option>' +
+        '<option value="Bag Making">Bag Making</option>' +
+      '</select>' +
+      '<label style="font-size:10px;font-weight:700;color:var(--text3)">MACHINE</label>' +
+      '<select id="pptx-machine" onchange="window.renderPPTXTable()" style="background:var(--bg3);border:1.5px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:11px;outline:none">' +
+        '<option value="">All Machines</option>' +
+      '</select>' +
+      '<div id="pptx-summary" style="margin-left:auto;font-size:11px;color:var(--text3);font-weight:600"></div>' +
     '</div>' +
 
-    // Table
+    // ── Table ────────────────────────────────────────────────────────
     '<div style="overflow-x:auto;border:1.5px solid var(--border);border-radius:10px">' +
-      '<table id="pptx-table" style="width:100%;border-collapse:collapse;font-size:11px;min-width:2200px">' +
+      '<table id="pptx-table" style="width:100%;border-collapse:collapse;font-size:11px">' +
         '<thead>' +
-          '<tr style="background:var(--bg3);position:sticky;top:0;z-index:10">' +
-            '<th style="padding:7px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap;min-width:80px">DATE</th>' +
-            '<th style="padding:7px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap;min-width:90px">MACHINE</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">PROD MTR</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">PROD KG</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">TOTAL MINS</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--orange);white-space:nowrap">TECH DT</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">PLAN DT</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--red);white-space:nowrap">UNPLAN DT</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">MKT DT</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">AVAIL TIME</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--green);white-space:nowrap">RUN MINS</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">FACTOR MINS</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--cyan);white-space:nowrap">AVG SPEED</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">STD SPEED</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">JOB SET MIN</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">NO.JOB SET</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--cyan);white-space:nowrap">EE %</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--purple);white-space:nowrap">OEE %</th>' +
-            '<th style="padding:7px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">STATUS</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">PLAN KG</th>' +
-            '<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">TGT vs ACT</th>' +
-            '<th style="padding:7px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap;min-width:160px">PROCESS DT REMARKS</th>' +
-            '<th style="padding:7px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap;min-width:160px">TECHNICAL DT REMARKS</th>' +
+          '<tr>' +
+            th('MACHINE','var(--cyan)') +
+            th('DAYS','var(--text3)',true) +
+            th('PROD MTR / PCS','var(--text3)',true) +
+            th('PROD KG','var(--text3)',true) +
+            th('TOTAL MINS','var(--text3)',true) +
+            th('TECH DT','var(--orange)',true) +
+            th('PLAN DT','var(--text3)',true) +
+            th('UNPLAN DT','var(--red)',true) +
+            th('MKT DT','var(--text3)',true) +
+            th('PROCESS DT','var(--text3)',true) +
+            th('AVAIL TIME','var(--green)',true) +
+            th('RUN MINS','var(--green)',true) +
+            th('FACTOR MINS','var(--purple)',true) +
+            th('AVG SPEED','var(--cyan)',true) +
+            th('STD SPEED','var(--text3)',true) +
+            th('EE %','var(--cyan)',true) +
+            th('AVAIL %','var(--text3)',true) +
+            th('PERF %','var(--text3)',true) +
+            th('QUALITY %','var(--text3)',true) +
+            th('OEE %','var(--purple)',true) +
+            th('PLAN KG','var(--text3)',true) +
+            th('TGT vs ACT','var(--text3)',true) +
+            th('PROCESS DT REMARKS','var(--text3)') +
+            th('TECHNICAL DT REMARKS','var(--text3)') +
           '</tr>' +
         '</thead>' +
-        '<tbody id="pptx-tbody"><tr><td colspan="23" style="text-align:center;padding:30px;color:var(--text3)">Loading data...</td></tr></tbody>' +
+        '<tbody id="pptx-tbody">' +
+          '<tr><td colspan="24" style="text-align:center;padding:40px;color:var(--text3)">Loading...</td></tr>' +
+        '</tbody>' +
         '<tfoot id="pptx-tfoot"></tfoot>' +
       '</table>' +
     '</div>';
 
-  // Populate machine dropdown based on dept
   window.pptxPopulateMachines();
   window.renderPPTXTable();
 }
 
+
 window.pptxPreset = function(preset) {
-  var today = new Date();
-  var ymd = function(d){ return d.toISOString().slice(0,10); };
+  var today = new Date(), ymd=function(d){return d.toISOString().slice(0,10);};
   var from, to;
-  if (preset === 'week') {
-    var mon = new Date(today); mon.setDate(today.getDate()-((today.getDay()||7)-1));
-    var sun = new Date(mon); sun.setDate(mon.getDate()+6);
-    from = ymd(mon); to = ymd(sun);
-  } else if (preset === 'lastweek') {
-    var lmon = new Date(today); lmon.setDate(today.getDate()-((today.getDay()||7)-1)-7);
-    var lsun = new Date(lmon); lsun.setDate(lmon.getDate()+6);
-    from = ymd(lmon); to = ymd(lsun);
-  } else if (preset === 'month') {
-    from = ymd(new Date(today.getFullYear(), today.getMonth(), 1));
-    to   = ymd(today);
+  if (preset==='today') { from=to=ymd(today); }
+  else if (preset==='week') {
+    var m=new Date(today); m.setDate(today.getDate()-((today.getDay()||7)-1));
+    var s=new Date(m); s.setDate(m.getDate()+6); from=ymd(m); to=ymd(s);
+  } else if (preset==='lastweek') {
+    var lm=new Date(today); lm.setDate(today.getDate()-((today.getDay()||7)-1)-7);
+    var ls=new Date(lm); ls.setDate(lm.getDate()+6); from=ymd(lm); to=ymd(ls);
+  } else if (preset==='month') {
+    from=ymd(new Date(today.getFullYear(),today.getMonth(),1)); to=ymd(today);
   }
-  var fe = document.getElementById('pptx-from');
-  var te = document.getElementById('pptx-to');
-  if (fe) fe.value = from;
-  if (te) te.value = to;
+  var fe=document.getElementById('pptx-from'), te=document.getElementById('pptx-to');
+  if(fe)fe.value=from; if(te)te.value=to;
   window.renderPPTXTable();
 };
 
 window.pptxPopulateMachines = function() {
-  var dept  = (document.getElementById('pptx-dept') || {value:''}).value;
-  var sel   = document.getElementById('pptx-machine'); if (!sel) return;
-  var machines = (APP.machines || []).filter(function(m){ return !dept || m.dept === dept; });
-  sel.innerHTML = '<option value="">All Machines</option>' +
-    machines.map(function(m){ return '<option value="'+m.code+'">'+m.name+'</option>'; }).join('');
+  var dept=(document.getElementById('pptx-dept')||{}).value||'';
+  var sel=document.getElementById('pptx-machine'); if(!sel) return;
+  var machines=(APP.machines||[]).filter(function(m){ return !dept||m.dept===dept; });
+  sel.innerHTML='<option value="">All Machines</option>'+
+    machines.map(function(m){return '<option value="'+m.code+'">'+m.name+'</option>';}).join('');
 };
 
 window.renderPPTXTable = function() {
@@ -2882,216 +2912,292 @@ window.renderPPTXTable = function() {
   var to      = (document.getElementById('pptx-to')||{value:''}).value;
   var dept    = (document.getElementById('pptx-dept')||{value:''}).value;
   var machine = (document.getElementById('pptx-machine')||{value:''}).value;
-  var tbody   = document.getElementById('pptx-tbody'); if (!tbody) return;
+  var tbody   = document.getElementById('pptx-tbody'); if(!tbody) return;
   var tfoot   = document.getElementById('pptx-tfoot');
   var summary = document.getElementById('pptx-summary');
 
-  // Gather data from all production data sources
-  var allData = (APP.productionData || []).concat(APP.productionDataRaw || []);
-  // Deduplicate by id if present
-  var seen = {}; var deduped = [];
-  allData.forEach(function(r){ var k=r.id||JSON.stringify(r); if(!seen[k]){seen[k]=true;deduped.push(r);} });
+  // Gather production data
+  var allData = (APP.productionData||[]).concat(APP.productionDataRaw||[]);
+  var seen={}, deduped=[];
+  allData.forEach(function(r){var k=r.id||JSON.stringify(r); if(!seen[k]){seen[k]=true;deduped.push(r);}});
 
   // Filter
   var rows = deduped.filter(function(r){
-    var rDate = String(r.PRODUCTION_DATE||r.productionDate||r.date||'').slice(0,10);
-    if (from && rDate < from) return false;
-    if (to   && rDate > to)   return false;
-    var rDept = r.dept||r.DEPT||r.department||'';
-    if (dept && rDept !== dept) return false;
-    var rMachine = r.MACHINE_NO||r.machineNo||r.machine||'';
-    if (machine && rMachine !== machine) return false;
+    var d=String(r.PRODUCTION_DATE||r.productionDate||r.date||'').slice(0,10);
+    if(from && d<from) return false;
+    if(to   && d>to)   return false;
+    var rd=r.dept||r.DEPT||'';
+    if(dept && rd!==dept) return false;
+    var rm=r.MACHINE_NO||r.machineNo||r.machine||'';
+    if(machine && rm!==machine) return false;
     return true;
   });
 
-  // GROUP by Machine — aggregate all dates in range into one row per machine
-  var machineMap = {};
+  // Dept factor
+  var depFactor=function(dept){
+    if(!dept) return 1;
+    var d=dept.toLowerCase();
+    if(d.includes('laminat')) return 0.75;
+    if(d.includes('slit'))    return 0.50;
+    if(d.includes('bag'))     return 0.75;
+    return 1.0;
+  };
+
+  var n=function(v){return parseFloat(String(v||0).replace(/,/g,''))||0;};
+  var fv=function(r,keys){for(var i=0;i<keys.length;i++){var v=r[keys[i]];if(v!==undefined&&v!==null&&v!=='')return v;}return '';};
+
+  // Group by machine
+  var machMap={};
   rows.forEach(function(r){
-    var mach = String(r.MACHINE_NO||r.machineNo||r.machine||'—');
-    var dept  = r.dept||r.DEPT||r.department||'';
-    if(!machineMap[mach]) machineMap[mach]={
-      machine:mach, dept:dept,
-      prodM:0, prodKg:0, totalMins:0,
-      techDT:0, planDT:0, unplanDT:0, processDT:0, mktDT:0,
-      runMins:0, factorM:0,
-      eeSum:0, eeCount:0, oeeSum:0, oeeCount:0,
-      planKg:0, days:new Set()
+    var mach=String(fv(r,['MACHINE_NO','machineNo','machine'])||'—');
+    var dept2=r.dept||r.DEPT||'';
+    if(!machMap[mach]) machMap[mach]={
+      machine:mach, dept:dept2,
+      prodM:0, prodPcs:0, prodKg:0, totalMins:0,
+      techDT:0, planDT:0, unplanDT:0, mktDT:0, processDT:0,
+      runMins:0, days:new Set()
     };
-    var m = machineMap[mach];
-    var n  = function(v){ return parseFloat(String(v||0).replace(/,/g,''))||0; };
-    var fv = function(r,keys){ for(var i=0;i<keys.length;i++){ var v=r[keys[i]]; if(v!==undefined&&v!==null&&v!=='') return v; } return ''; };
-    var date = String(fv(r,['PRODUCTION_DATE','productionDate','date'])||'').slice(0,10);
+    var m=machMap[mach];
+    var date=String(fv(r,['PRODUCTION_DATE','productionDate','date'])||'').slice(0,10);
     m.days.add(date);
-    m.prodM    += n(fv(r,['PRODUCTION_METER','productionMeter']));
-    m.prodKg   += n(fv(r,['PRODUCTION_KG','productionKg']));
-    m.totalMins+= n(fv(r,['TOTAL_JOB_TIME_MIN','totalJobTimeMin']))||1440;
-    m.techDT   += n(fv(r,['TOTAL_TECHNICAL_DOWNTIME_MIN']));
-    m.planDT   += n(fv(r,['PLANNING_DOWNTIME_MIN','planningDT']));
-    m.unplanDT += n(fv(r,['UNPLANNED_DOWNTIME_MIN','unplannedDT']));
-    m.processDT+= n(fv(r,['PROCESS_DOWNTIME_MIN','processDowntime']));
-    m.mktDT    += n(fv(r,['APPROVAL_DOWNTIME_MIN','approvalDT']));
-    m.runMins  += n(fv(r,['PRODUCTION_MIN','PRODUCTION_RUNNING_MIN']));
-    m.planKg   += n(fv(r,['planKg','PLAN_KG']));
-    var ee  = n(fv(r,['EE_PCT','ee'])); if(ee>0){m.eeSum+=ee;m.eeCount++;}
-    var oee = n(fv(r,['OEE_PCT','oee'])); if(oee>0){m.oeeSum+=oee;m.oeeCount++;}
-    m.factorM  += n(fv(r,['PRODUCTION_MIN','PRODUCTION_RUNNING_MIN']));
+    m.prodM    +=n(fv(r,['PRODUCTION_METER','productionMeter']));
+    m.prodPcs  +=n(fv(r,['PRODUCTION_PCS','productionPcs','prodPcs']));
+    m.prodKg   +=n(fv(r,['PRODUCTION_KG','productionKg']));
+    m.totalMins+=n(fv(r,['TOTAL_JOB_TIME_MIN','totalJobTimeMin']))||1440;
+    m.techDT   +=n(fv(r,['TOTAL_TECHNICAL_DOWNTIME_MIN']));
+    m.planDT   +=n(fv(r,['PLANNING_DOWNTIME_MIN']));
+    m.unplanDT +=n(fv(r,['UNPLANNED_DOWNTIME_MIN']));
+    m.mktDT    +=n(fv(r,['APPROVAL_DOWNTIME_MIN']));
+    m.processDT+=n(fv(r,['PROCESS_DOWNTIME_MIN','processDowntime']));
+    m.runMins  +=n(fv(r,['PRODUCTION_MIN','PRODUCTION_RUNNING_MIN']));
   });
 
-  var aggregated = Object.values(machineMap).sort(function(a,b){ return a.machine.localeCompare(b.machine); });
+  var aggregated=Object.values(machMap).sort(function(a,b){return a.machine.localeCompare(b.machine);});
+  window._lastPPTXAggregated = aggregated;
 
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="23" style="text-align:center;padding:30px;color:var(--text3)">No records found for selected date range and filters.</td></tr>';
-    if (tfoot) tfoot.innerHTML = '';
-    if (summary) summary.textContent = '0 records';
+  if(!rows.length){
+    tbody.innerHTML='<tr><td colspan="24" style="text-align:center;padding:40px;color:var(--text3)">No records for selected range.</td></tr>';
+    if(tfoot) tfoot.innerHTML='';
+    if(summary) summary.textContent='0 records';
     return;
   }
 
-  // Helper extractors
-  var n  = function(v){ return parseFloat(String(v||0).replace(/,/g,''))||0; };
-  var fv = function(r,keys){ for(var i=0;i<keys.length;i++){ var v=r[keys[i]]; if(v!==undefined&&v!==null&&v!=='') return v; } return ''; };
-  var nd = function(v,dec){ var x=parseFloat(String(v||0).replace(/,/g,'')); return isNaN(x)?'—':(dec?x.toFixed(dec):Math.round(x).toLocaleString()); };
-  var pct= function(v){ var x=parseFloat(String(v||0).replace(/,/g,'')); return isNaN(x)||x===0?'—':x.toFixed(2)+'%'; };
+  // Totals
+  var totProdM=0,totProdKg=0,totTech=0,totPlan=0,totUnplan=0,totMkt=0,totProc=0,totRun=0,totAvail=0;
+  var eeArr=[],oeeArr=[],availPArr=[];
 
-  // Totals accumulators
-  var totProdM=0,totProdKg=0,totTechDT=0,totPlanDT=0,totUnplanDT=0,totMktDT=0,totRunMins=0,totPlanKg=0;
-  var eeSum=0,oeeSum=0,eeCount=0,oeeCount=0;
+  var inp=function(type,id,val,onch,style,ph){
+    return '<input type="'+type+'" id="'+id+'" value="'+val+'" onchange="'+onch+'" placeholder="'+(ph||'')+'" style="'+style+'">';
+  };
+  var ta=function(id,val,onch){
+    return '<textarea id="'+id+'" rows="3" onchange="'+onch+'" '+
+      'style="width:100%;min-width:160px;background:var(--bg3);border:1.5px solid var(--border);'+
+      'border-radius:6px;padding:5px 7px;color:var(--text);font-size:10px;resize:vertical;outline:none;box-sizing:border-box;line-height:1.4">'+val+'</textarea>';
+  };
 
-  // Render aggregated machine rows (one row per machine, all dates summed)
-  var html = aggregated.map(function(m){
-    var mach      = m.machine;
-    var prodM     = m.prodM;
-    var prodKg    = m.prodKg;
-    var totMin    = m.totalMins;
-    var techDT    = m.techDT;
-    var planDT    = m.planDT;
-    var unplanDT  = m.unplanDT;
-    var mktDT     = m.mktDT;
-    var runMins   = m.runMins;
-    var availT    = totMin - planDT - mktDT;
-    var machObj   = (APP.machines||[]).find(function(x){ return x.code===mach; })||{};
-    var stdSpeed  = (window.pptxSpeedOverrides&&window.pptxSpeedOverrides[mach]) || machObj.standardSpeed || 400;
-    // Dept-wise factor (same as main EE engine)
-    var dept2     = m.dept||machObj.dept||'';
-    var deptFactor= dept2==='Lamination'?0.75:dept2==='Slitting'?0.50:dept2==='Bag Making'?0.75:1.0;
-    var factorMins= runMins * deptFactor;
-    // Avg speed from actual run (for display only)
-    var avgSpeed  = runMins>0&&prodM>0 ? (prodM/runMins) : 0;
-    // EE = (ProdMeters / FactorMins) / StdSpeed × 100
-    var calcEE    = (factorMins>0&&stdSpeed>0&&prodM>0)
-      ? (prodM / factorMins) / stdSpeed * 100
-      : (m.eeCount>0 ? m.eeSum/m.eeCount : 0);
-    var ee        = calcEE;
-    // Recalculate OEE from summed values: Production Min ÷ Available Min × 100
-    // Available = Total − Tech DT − Plan DT − Unplan DT − Process DT − Approval DT
-    var availMin  = m.totalMins - m.techDT - m.planDT - m.unplanDT - (m.processDT||0) - m.mktDT;
-    var oee       = (m.runMins>0 && availMin>0) ? (m.runMins/availMin*100) : (m.oeeCount>0 ? m.oeeSum/m.oeeCount : 0);
-    var planKg    = m.planKg;
-    var tgtAct    = planKg>0?(prodKg/planKg*100).toFixed(1)+'%':'—';
-    var dayCount  = m.days.size;
-    var deptLabel = m.dept||'—';
+  var html=aggregated.map(function(m){
+    var isBag=m.dept==='Bag Making';
+    var factor=depFactor(m.dept);
+    var machObj=(APP.machines||[]).find(function(x){
+      return String(x.code||'').toUpperCase()===m.machine.toUpperCase()||
+             String(x.name||'').toUpperCase()===m.machine.toUpperCase();
+    })||{};
+    var stdSpeed=(window.pptxSpeedOverrides&&window.pptxSpeedOverrides[m.machine])||machObj.standardSpeed||400;
 
-    // Accumulate grand totals
-    totProdM   += prodM;   totProdKg  += prodKg;
-    totTechDT  += techDT;  totPlanDT  += planDT;
-    totUnplanDT+= unplanDT;totMktDT   += mktDT;
-    totRunMins += runMins; totPlanKg  += planKg;
-    if(ee>0){eeSum+=ee;eeCount++;}
-    if(oee>0){oeeSum+=oee;oeeCount++;}
+    // Production value
+    var prodVal=isBag?m.prodPcs:m.prodM;
 
-    var eeColor  = ee>=80?'var(--green)':ee>=65?'var(--orange)':'var(--red)';
-    var oeeColor = oee>=60?'var(--green)':oee>=45?'var(--orange)':'var(--red)';
-    var dtColor  = techDT>120?'var(--red)':techDT>60?'var(--orange)':'var(--green)';
+    // Available = Total − Tech − Plan − Unplan − Mkt − Process
+    var availT=m.totalMins-m.techDT-m.planDT-m.unplanDT-m.mktDT-m.processDT;
+
+    // Factor Mins = Run × factor
+    var factorMins=m.runMins*factor;
+
+    // Avg Speed = Production ÷ Factor Mins
+    var avgSpeed=factorMins>0&&prodVal>0 ? prodVal/factorMins : 0;
+
+    // EE% = Avg Speed ÷ Std Speed × 100
+    var ee=stdSpeed>0&&avgSpeed>0 ? avgSpeed/stdSpeed*100 : 0;
+
+    // Availability% = Run ÷ Avail × 100
+    var availP=availT>0 ? m.runMins/availT*100 : 0;
+
+    // Performance% = EE%
+    var perfP=ee;
+
+    // Quality% = 100
+    var qualP=100;
+
+    // OEE = Avail% × Perf% ÷ 100
+    var oee=availP>0&&perfP>0 ? availP*perfP/100 : 0;
+
+    // Plan KG (manual override or from data)
+    var planKg=window.pptxPlanKg[m.machine]!==undefined ? window.pptxPlanKg[m.machine] : m.planKg||0;
+
+    // Target vs Actual
+    var tgtAct=planKg>0&&m.prodKg>0 ? (m.prodKg/planKg*100).toFixed(1)+'%' : '—';
+    var tgtColor=planKg>0&&m.prodKg>=planKg?'var(--green)':planKg>0?'var(--red)':'var(--text3)';
+
+    // Remarks
+    var pRem=window.pptxRemarks[m.machine]&&window.pptxRemarks[m.machine].processRemarks||'';
+    var tRem=window.pptxRemarks[m.machine]&&window.pptxRemarks[m.machine].techRemarks||'';
+
+    // Store computed for export
+    m._stdSpeed=stdSpeed; m._factor=factor; m._prodVal=prodVal;
+    m._availT=availT; m._factorMins=factorMins; m._avgSpeed=avgSpeed;
+    m._ee=ee; m._availP=availP; m._perfP=perfP; m._qualP=qualP; m._oee=oee;
+    m._planKg=planKg; m._tgtAct=tgtAct;
+
+    // Accumulate totals
+    totProdM  +=m.prodM;  totProdKg +=m.prodKg;
+    totTech   +=m.techDT; totPlan   +=m.planDT;
+    totUnplan +=m.unplanDT;totMkt   +=m.mktDT;
+    totProc   +=m.processDT;totRun  +=m.runMins;
+    totAvail  +=availT;
+    if(ee>0)     eeArr.push(ee);
+    if(oee>0)    oeeArr.push(oee);
+    if(availP>0) availPArr.push(availP);
+
+    var dayCount=m.days.size;
+
+    // Color helpers
+    var eeC  =ee>=80?'var(--green)':ee>=65?'var(--orange)':'var(--red)';
+    var oeeC =oee>=60?'var(--green)':oee>=45?'var(--orange)':'var(--red)';
+    var dtC  =m.techDT>120?'var(--red)':m.techDT>60?'var(--orange)':'var(--green)';
+    var avC  =availP>=80?'var(--green)':availP>=60?'var(--orange)':'var(--red)';
+
+    var fmtP=function(v){ return v>0 ? v.toFixed(1)+'%' : '—'; };
+    var fmtN=function(v){ return v>0 ? Math.round(v).toLocaleString() : '0'; };
+
+    var spInp='width:62px;background:var(--bg3);border:1.5px solid var(--cyan);border-radius:5px;padding:3px 5px;color:var(--cyan);font-size:11px;font-weight:700;text-align:right;outline:none';
+    var pkInp='width:75px;background:var(--bg3);border:1.5px solid var(--border);border-radius:5px;padding:3px 5px;color:var(--text);font-size:11px;text-align:right;outline:none';
 
     return '<tr style="border-bottom:1px solid var(--border)">' +
-      '<td style="padding:6px 8px;font-size:10px;color:var(--text3);white-space:nowrap">'+dayCount+' day(s)</td>' +
-      '<td style="padding:6px 8px;font-weight:700;color:var(--cyan);white-space:nowrap">'+mach+'</td>' +
-      '<td style="padding:6px 8px;text-align:right">'+Math.round(prodM).toLocaleString()+'</td>' +
-      '<td style="padding:6px 8px;text-align:right;font-weight:600">'+Math.round(prodKg).toLocaleString()+'</td>' +
-      '<td style="padding:6px 8px;text-align:right">'+Math.round(totMin)+'</td>' +
-      '<td style="padding:6px 8px;text-align:right;color:'+dtColor+';font-weight:700">'+Math.round(techDT)+'</td>' +
-      '<td style="padding:6px 8px;text-align:right">'+Math.round(planDT)+'</td>' +
-      '<td style="padding:6px 8px;text-align:right;color:'+(unplanDT>0?'var(--red)':'var(--text3)')+'">'+Math.round(unplanDT)+'</td>' +
-      '<td style="padding:6px 8px;text-align:right">'+Math.round(mktDT)+'</td>' +
-      '<td style="padding:6px 8px;text-align:right">'+Math.round(availT)+'</td>' +
-      '<td style="padding:6px 8px;text-align:right;color:var(--green);font-weight:600">'+Math.round(runMins)+'</td>' +
-      '<td style="padding:6px 8px;text-align:right;color:var(--purple)">'+Math.round(factorMins)+'</td>' +
-      '<td style="padding:6px 8px;text-align:right;color:var(--cyan)">'+(avgSpeed>0?avgSpeed.toFixed(1):'—')+'</td>' +
-      '<td style="padding:6px 8px;text-align:right;padding:4px 6px">'+
-        '<input type="number" id="spd_'+mach+'" value="'+Math.round(stdSpeed)+'" '+
-        'onchange="window.pptxUpdateSpeed(\''+mach+'\',this.value)" '+
-        'style="width:65px;background:var(--bg3);border:1.5px solid var(--cyan);border-radius:5px;'+
-        'padding:3px 6px;color:var(--cyan);font-size:11px;font-weight:700;text-align:right;outline:none">'+
+      // Machine
+      '<td style="padding:8px 10px;font-weight:800;color:var(--cyan);white-space:nowrap;min-width:90px">'+m.machine+'</td>' +
+      // Days
+      '<td style="padding:8px 10px;text-align:right;color:var(--text3)">'+dayCount+'</td>' +
+      // Prod MTR/PCS
+      '<td style="padding:8px 10px;text-align:right;font-weight:600">'+fmtN(prodVal)+(isBag?' pcs':'')+'</td>' +
+      // Prod KG
+      '<td style="padding:8px 10px;text-align:right;font-weight:600">'+fmtN(m.prodKg)+'</td>' +
+      // Total Mins
+      '<td style="padding:8px 10px;text-align:right;color:var(--text3)">'+fmtN(m.totalMins)+'</td>' +
+      // Tech DT
+      '<td style="padding:8px 10px;text-align:right;font-weight:700;color:'+dtC+'">'+fmtN(m.techDT)+'</td>' +
+      // Plan DT
+      '<td style="padding:8px 10px;text-align:right">'+fmtN(m.planDT)+'</td>' +
+      // Unplan DT
+      '<td style="padding:8px 10px;text-align:right;color:'+(m.unplanDT>0?'var(--red)':'var(--text3)')+'">'+fmtN(m.unplanDT)+'</td>' +
+      // Mkt DT
+      '<td style="padding:8px 10px;text-align:right;color:var(--text3)">'+fmtN(m.mktDT)+'</td>' +
+      // Process DT
+      '<td style="padding:8px 10px;text-align:right;color:var(--text3)">'+fmtN(m.processDT)+'</td>' +
+      // Avail Time
+      '<td style="padding:8px 10px;text-align:right;font-weight:700;color:var(--green)">'+Math.round(availT)+'</td>' +
+      // Run Mins
+      '<td style="padding:8px 10px;text-align:right;color:var(--green);font-weight:600">'+fmtN(m.runMins)+'</td>' +
+      // Factor Mins
+      '<td style="padding:8px 10px;text-align:right;color:var(--purple)">'+fmtN(factorMins)+'</td>' +
+      // Avg Speed
+      '<td style="padding:8px 10px;text-align:right;color:var(--cyan)">'+(avgSpeed>0?avgSpeed.toFixed(1):'—')+'</td>' +
+      // Std Speed (editable)
+      '<td style="padding:5px 8px;text-align:right">'+
+        inp('number','spd_'+m.machine,Math.round(stdSpeed),
+          "window.pptxSpeedOverrides['"+m.machine+"']=+this.value;window.renderPPTXTable()",spInp)+
       '</td>' +
-      '<td style="padding:6px 8px;text-align:right">—</td>' +
-      '<td style="padding:6px 8px;text-align:right">—</td>' +
-      '<td style="padding:6px 8px;text-align:right;font-weight:700;color:'+eeColor+'">'+(ee>0?ee.toFixed(2)+'%':'—')+'</td>' +
-      '<td style="padding:6px 8px;text-align:right;font-weight:700;color:'+oeeColor+'">'+(oee>0?oee.toFixed(2)+'%':'—')+'</td>' +
-      '<td style="padding:6px 8px;font-size:11px;color:var(--text3)">'+deptLabel+'</td>' +
-      '<td style="padding:6px 8px;text-align:right">'+(planKg>0?Math.round(planKg).toLocaleString():'—')+'</td>' +
-      '<td style="padding:6px 8px;text-align:right;font-weight:700;color:'+(planKg>0&&prodKg>=planKg?'var(--green)':planKg>0?'var(--red)':'var(--text3)')+'">'+tgtAct+'</td>' +
-      '<td style="padding:6px 8px;font-size:10px;color:var(--text3)">—</td>' +
-      '<td style="padding:6px 8px;font-size:10px;color:var(--text3)">—</td>' +
+      // EE%
+      '<td style="padding:8px 10px;text-align:right;font-weight:800;color:'+eeC+'">'+fmtP(ee)+'</td>' +
+      // Avail%
+      '<td style="padding:8px 10px;text-align:right;color:'+avC+'">'+fmtP(availP)+'</td>' +
+      // Perf%
+      '<td style="padding:8px 10px;text-align:right;color:var(--text3)">'+fmtP(perfP)+'</td>' +
+      // Quality%
+      '<td style="padding:8px 10px;text-align:right;color:var(--green)">'+fmtP(qualP)+'</td>' +
+      // OEE%
+      '<td style="padding:8px 10px;text-align:right;font-weight:800;color:'+oeeC+'">'+fmtP(oee)+'</td>' +
+      // Plan KG (editable)
+      '<td style="padding:5px 8px;text-align:right">'+
+        inp('number','pkg_'+m.machine,planKg||'',
+          "window.pptxPlanKg['"+m.machine+"']=+this.value;window.renderPPTXTable()",pkInp,'Plan KG')+
+      '</td>' +
+      // Tgt vs Actual
+      '<td style="padding:8px 10px;text-align:right;font-weight:700;color:'+tgtColor+'">'+tgtAct+'</td>' +
+      // Process DT Remarks (editable textarea)
+      '<td style="padding:5px 8px;vertical-align:top">'+
+        ta('prem_'+m.machine, pRem,
+          "if(!window.pptxRemarks['"+m.machine+"'])window.pptxRemarks['"+m.machine+"']={};window.pptxRemarks['"+m.machine+"'].processRemarks=this.value")+
+      '</td>' +
+      // Technical DT Remarks (editable textarea)
+      '<td style="padding:5px 8px;vertical-align:top">'+
+        ta('trem_'+m.machine, tRem,
+          "if(!window.pptxRemarks['"+m.machine+"'])window.pptxRemarks['"+m.machine+"']={};window.pptxRemarks['"+m.machine+"'].techRemarks=this.value")+
+      '</td>' +
     '</tr>';
   }).join('');
 
   tbody.innerHTML = html;
 
-  // Totals row
-  var avgEE  = eeCount  ? (eeSum/eeCount).toFixed(2)+'%'  : '—';
-  var avgOEE = oeeCount ? (oeeSum/oeeCount).toFixed(2)+'%' : '—';
-  var tgtActTot = totPlanKg>0?(totProdKg/totPlanKg*100).toFixed(1)+'%':'—';
+  // ── Totals row ───────────────────────────────────────────────────
+  var avgEE  = eeArr.length   ? (eeArr.reduce(function(a,b){return a+b;},0)/eeArr.length).toFixed(1)+'%'   : '—';
+  var avgOEE = oeeArr.length  ? (oeeArr.reduce(function(a,b){return a+b;},0)/oeeArr.length).toFixed(1)+'%'  : '—';
+  var avgAv  = availPArr.length? (availPArr.reduce(function(a,b){return a+b;},0)/availPArr.length).toFixed(1)+'%':'—';
 
-  if (tfoot) tfoot.innerHTML =
+  if(tfoot) tfoot.innerHTML=
     '<tr style="background:var(--bg3);font-weight:700;border-top:2px solid var(--border)">' +
-      '<td style="padding:7px 8px;font-size:11px" colspan="2">TOTAL / AVG ('+rows.length+' records)</td>' +
-      '<td style="padding:7px 8px;text-align:right;color:var(--cyan)">'+Math.round(totProdM).toLocaleString()+'</td>' +
-      '<td style="padding:7px 8px;text-align:right;color:var(--green)">'+Math.round(totProdKg).toLocaleString()+'</td>' +
-      '<td style="padding:7px 8px">—</td>' +
-      '<td style="padding:7px 8px;text-align:right;color:var(--orange)">'+Math.round(totTechDT)+'</td>' +
-      '<td style="padding:7px 8px;text-align:right">'+Math.round(totPlanDT)+'</td>' +
-      '<td style="padding:7px 8px;text-align:right;color:var(--red)">'+Math.round(totUnplanDT)+'</td>' +
-      '<td style="padding:7px 8px;text-align:right">'+Math.round(totMktDT)+'</td>' +
-      '<td colspan="2" style="padding:7px 8px;text-align:right;color:var(--green)">'+Math.round(totRunMins)+'</td>' +
-      '<td colspan="4" style="padding:7px 8px">—</td>' +
-      '<td style="padding:7px 8px;text-align:right;color:var(--cyan)">'+avgEE+'</td>' +
-      '<td style="padding:7px 8px;text-align:right;color:var(--purple)">'+avgOEE+'</td>' +
-      '<td style="padding:7px 8px">—</td>' +
-      '<td style="padding:7px 8px;text-align:right">'+Math.round(totPlanKg).toLocaleString()+'</td>' +
-      '<td style="padding:7px 8px;text-align:right">'+tgtActTot+'</td>' +
-      '<td colspan="2" style="padding:7px 8px">—</td>' +
+      '<td style="padding:9px 10px;font-size:11px;color:var(--text3)" colspan="2">TOTAL / AVG · '+aggregated.length+' machines · '+rows.length+' records</td>' +
+      '<td style="padding:9px 10px;text-align:right;color:var(--cyan)">'+Math.round(totProdM).toLocaleString()+'</td>' +
+      '<td style="padding:9px 10px;text-align:right;color:var(--green)">'+Math.round(totProdKg).toLocaleString()+'</td>' +
+      '<td style="padding:9px 10px;text-align:right">—</td>' +
+      '<td style="padding:9px 10px;text-align:right;color:var(--orange)">'+Math.round(totTech)+'</td>' +
+      '<td style="padding:9px 10px;text-align:right">'+Math.round(totPlan)+'</td>' +
+      '<td style="padding:9px 10px;text-align:right;color:var(--red)">'+Math.round(totUnplan)+'</td>' +
+      '<td style="padding:9px 10px;text-align:right">'+Math.round(totMkt)+'</td>' +
+      '<td style="padding:9px 10px;text-align:right">'+Math.round(totProc)+'</td>' +
+      '<td style="padding:9px 10px;text-align:right;color:var(--green)">'+Math.round(totAvail)+'</td>' +
+      '<td style="padding:9px 10px;text-align:right;color:var(--green)">'+Math.round(totRun)+'</td>' +
+      '<td colspan="3" style="padding:9px 10px;text-align:center">—</td>' +
+      '<td style="padding:9px 10px;text-align:right;color:var(--cyan)">'+avgEE+'</td>' +
+      '<td style="padding:9px 10px;text-align:right">'+avgAv+'</td>' +
+      '<td style="padding:9px 10px;text-align:right">—</td>' +
+      '<td style="padding:9px 10px;text-align:right;color:var(--green)">100%</td>' +
+      '<td style="padding:9px 10px;text-align:right;color:var(--purple)">'+avgOEE+'</td>' +
+      '<td colspan="4" style="padding:9px 10px;text-align:center">—</td>' +
     '</tr>';
 
-  if (summary) summary.textContent = aggregated.length + ' machines | ' + rows.length + ' records | ' + (from||'—') + ' to ' + (to||'—');
-};
-
-window.pptxSpeedOverrides = {};
-window.pptxUpdateSpeed = function(machine, val){
-  var spd = parseFloat(val)||0;
-  if(spd<=0) return;
-  window.pptxSpeedOverrides[machine] = spd;
-  // recalculate and re-render table only
-  window.renderPPTXTable();
+  if(summary) summary.textContent=aggregated.length+' machines · '+rows.length+' records · '+(from||'—')+' → '+(to||'—');
 };
 
 window.exportPPTXcsv = function() {
-  var tbody = document.getElementById('pptx-tbody'); if (!tbody) return;
-  var headers = ['Date','Machine','Prod Mtrs','Prod KG','Total Mins','Tech DT','Plan DT','Unplan DT','Mkt DT','Avail Time','Run Mins','Factor Mins','Avg Speed','Std Speed','Job Set Min','No.Job Set','EE%','OEE%','Status','Plan KG','Tgt vs Act','Process DT Remarks','Technical DT Remarks'];
-  var rows = [headers.join(',')];
-  tbody.querySelectorAll('tr').forEach(function(tr){
-    var cells = Array.from(tr.querySelectorAll('td')).map(function(td){
-      var v = (td.textContent||'').trim().replace(/,/g,'');
-      return v.includes(' ')||v.includes('"') ? '"'+v.replace(/"/g,'""')+'"' : v;
-    });
-    if (cells.length > 1) rows.push(cells.join(','));
+  var agg = window._lastPPTXAggregated||[]; if(!agg.length){if(typeof toast==='function')toast('No data','error');return;}
+  var q=function(v){v=String(v===null||v===undefined?'':v);return v.includes(',')||v.includes('"')||v.includes('\n')?'"'+v.replace(/"/g,'""')+'"':v;};
+  var headers=['Date','Machine','Prod Mtrs / Pcs','Prod KG','Total Mins','Tech DT','Plan DT','Unplan DT','Mkt DT','Process DT','Avail Time','Run Mins','Factor Mins','Avg Speed','Std Speed','EE%','OEE%','AVAILIBILTY','PERFORMANCE','QUALITY','Plan KG','Tgt vs Act','Process DT Remarks','Technical DT Remarks'];
+  var rowsCSV=[headers.join(',')];
+  agg.forEach(function(m){
+    var pr=window.pptxRemarks[m.machine]||{};
+    rowsCSV.push([
+      (m.days.size)+' day(s)', m.machine,
+      Math.round(m._prodVal||0), Math.round(m.prodKg),
+      Math.round(m.totalMins), Math.round(m.techDT), Math.round(m.planDT),
+      Math.round(m.unplanDT), Math.round(m.mktDT), Math.round(m.processDT),
+      Math.round(m._availT), Math.round(m.runMins), Math.round(m._factorMins),
+      m._avgSpeed>0?m._avgSpeed.toFixed(1):'#DIV/0!', Math.round(m._stdSpeed),
+      m._ee>0?m._ee.toFixed(1)+'%':'#DIV/0!',
+      m._oee>0?m._oee.toFixed(1)+'%':'#DIV/0!',
+      m._availP>0?m._availP.toFixed(1)+'%':'0.0%',
+      m._perfP>0?m._perfP.toFixed(1)+'%':'#DIV/0!',
+      '100.0%',
+      m._planKg||'', m._tgtAct||'#DIV/0!',
+      pr.processRemarks||'', pr.techRemarks||''
+    ].map(q).join(','));
   });
-  var blob = new Blob([rows.join('\n')], {type:'text/csv;charset=utf-8;'});
-  var a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'pptx_data_'+new Date().toISOString().slice(0,10)+'.csv';
-  a.click();
-  if (typeof toast === 'function') toast('CSV exported', 'success');
+  // Add footer note
+  rowsCSV.push([',,,,,,,,,,,,,,,,,,,,ADD MANUALLY BY DEPARTMENT INCHARGES,,ADD MANUALLY BY DEPARTMENT INCHARGES,ADD MANUALLY BY DEPARTMENT INCHARGES'].join(''));
+  var blob=new Blob([rowsCSV.join('\n')],{type:'text/csv;charset=utf-8;'});
+  var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='pptx_data_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+  if(typeof toast==='function') toast('CSV exported ✅','success');
 };
-
 
 
 
@@ -10555,9 +10661,12 @@ function normalizeProductionRow(row){
     : sheetEE;
   // OEE Available Time = Total − Tech DT − Planning DT − Unplanned DT − Process DT − Approval DT
   const availableMin = totalJobTimeMin - dt - planningDT - unplannedDT - processDT - approvalDT;
-  const calcOEE = (productionMin>0 && availableMin>0)
-    ? +((productionMin/availableMin)*100).toFixed(2)
-    : sheetOEE;
+  // OEE% = Availability% × Performance% ÷ 100  (matches CSV template)
+  // Availability% = Run Mins ÷ Avail Time × 100
+  // Performance%  = EE% (Avg Speed ÷ Std Speed × 100)
+  const _availPct = availableMin>0 ? (productionMin/availableMin*100) : 0;
+  const _perfPct  = calcEE; // EE% = Performance%
+  const calcOEE   = (_availPct>0 && _perfPct>0) ? +(_availPct * _perfPct / 100).toFixed(2) : sheetOEE;
   const standardSpeed = avgSpeedMM;
   // Waste % — use sheet value (PCTTOTAL_WASTE = %TOTAL WASTE after normalization)
   // Only calculate if sheet value is missing
@@ -11600,106 +11709,90 @@ function _dmCalc(row){
   const targetVsActual = planKg - prodKg;
   return {availTime, factorMins, avgSpeed, eePct, oeePct, targetVsActual, planDT};
 }
-function renderDeptDailyMeetingTab(tc, dept){
-  const store = _dmLoad();
-  const monthKey = APP.currentMonth;
-  const dayKeys = Object.keys(store).filter(k=>k.startsWith(monthKey+'_')||store[k].month===monthKey);
-  const rows = dayKeys.map(k=>({key:k, ...store[k]})).sort((a,b)=>(a.date||'')<(b.date||'')?1:-1);
-  const machines = MACHINES_BY_DEPT[dept]||[];
-
-  tc.innerHTML=`
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-      <div>
-        <div style="font-size:16px;font-weight:600;color:var(--cyan)">📊 Daily Meeting — ${dept}</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px">Manual entry — matches the Daily OEE & EE Details sheet format. EE%, OEE%, Available Time, Factor Mins & Target vs Actual auto-calculate.</div>
-      </div>
-      <button class="btn btn-primary btn-sm" onclick="window.openDailyMeetingForm('${dept}')">+ Add Row</button>
-    </div>
-    <div class="table-card"><div style="overflow-x:auto"><table style="font-size:11px">
-      <thead><tr>
-        <th>Date</th><th>Machine</th><th>Prod. Meters</th><th>Prod. KG</th><th>Total Mins</th>
-        <th>Tech DT</th><th>Plan DT</th><th>Avail. Time</th><th>Run Mins</th><th>Factor Mins</th>
-        <th>Avg Speed</th><th>Std Speed</th><th>EE%</th><th>OEE%</th><th>EE Status</th>
-        <th>Plan (Kg)</th><th>Target vs Actual</th><th>Remarks</th><th>Actions</th>
-      </tr></thead>
-      <tbody>
-        ${rows.length?rows.map(r=>{
-          const c=_dmCalc(r);
-          return `<tr>
-            <td style="white-space:nowrap">${fmtDDMMYYYY(r.date)||r.date||'-'}</td>
-            <td style="font-family:monospace;color:var(--cyan)">${r.machine||'-'}</td>
-            <td>${(+r.meters||0).toLocaleString()}</td>
-            <td>${(+r.prodKg||0).toLocaleString()}</td>
-            <td>${r.totalMins||0}</td>
-            <td style="color:var(--red)">${r.techDT||0}</td>
-            <td style="color:var(--orange)">${r.planDT||0}</td>
-            <td>${c.availTime.toFixed(0)}</td>
-            <td>${r.runMins||0}</td>
-            <td>${c.factorMins.toFixed(2)}</td>
-            <td>${c.avgSpeed.toFixed(2)}</td>
-            <td>${r.stdSpeed||0}</td>
-            <td style="color:${c.eePct>=80?'var(--green)':'var(--yellow)'};font-weight:600">${c.eePct.toFixed(1)}%</td>
-            <td style="color:${c.oeePct>=70?'var(--green)':'var(--yellow)'};font-weight:600">${c.oeePct.toFixed(1)}%</td>
-            <td>${r.eeStatus||'-'}</td>
-            <td>${(+r.planKg||0).toLocaleString()}</td>
-            <td style="color:${c.targetVsActual<=0?'var(--green)':'var(--red)'};font-weight:600">${c.targetVsActual>0?'-':''}${Math.abs(c.targetVsActual).toLocaleString()}</td>
-            <td style="max-width:180px;white-space:normal;font-size:10px;color:var(--text3)">${r.remarks||'-'}</td>
-            <td style="white-space:nowrap">
-              <button class="btn btn-outline btn-sm" onclick="window.openDailyMeetingForm('${dept}','${r.key}')">✏</button>
-              <button class="btn btn-danger btn-sm" onclick="window.deleteDailyMeetingRow('${r.key}','${dept}')">🗑</button>
-            </td>
-          </tr>`;
-        }).join(''):`<tr><td colspan="19" style="text-align:center;color:var(--text3);padding:20px">No entries yet for ${monthKey} — click "+ Add Row" to start logging today's daily meeting data.</td></tr>`}
-      </tbody>
-    </table></div></div>`;
-}
-
 window.openDailyMeetingForm=function(dept, editKey){
   const store = _dmLoad();
   const existing = editKey ? store[editKey] : null;
-  const machines = MACHINES_BY_DEPT[dept]||[];
+  const machines = (MACHINES_BY_DEPT&&MACHINES_BY_DEPT[dept])||
+    (APP.machines||[]).filter(m=>m.dept===dept).map(m=>m.name)||[];
   const today = new Date().toISOString().slice(0,10);
-  const html=`<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;overflow-y:auto" id="dm-form-overlay">
-    <div style="background:var(--bg2);border-radius:16px;padding:24px;max-width:520px;width:93%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.5)">
-      <h3 style="font-family:'Rajdhani',sans-serif;margin:0 0 14px">📊 ${editKey?'Edit':'Add'} Daily Meeting Row — ${dept}</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="form-group"><label>Date *</label><input type="date" id="dm-date" value="${existing?.date||today}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
-        <div class="form-group"><label>Machine *</label>
-          <select id="dm-machine" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)">
-            ${machines.map(m=>`<option ${existing?.machine===m?'selected':''}>${m}</option>`).join('')}
-          </select></div>
-        <div class="form-group"><label>Production Meters</label><input type="number" id="dm-meters" value="${existing?.meters||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
-        <div class="form-group"><label>Production KG</label><input type="number" id="dm-prodkg" value="${existing?.prodKg||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
-        <div class="form-group"><label>Total Mins</label><input type="number" id="dm-totalmins" value="${existing?.totalMins||1440}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
-        <div class="form-group"><label>Tech DT (Mins)</label><input type="number" id="dm-techdt" value="${existing?.techDT||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
-        <div class="form-group"><label>Plan DT (Mins)</label><input type="number" id="dm-plandt" value="${existing?.planDT||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
-        <div class="form-group"><label>Run Mins</label><input type="number" id="dm-runmins" value="${existing?.runMins||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
-        <div class="form-group"><label>Standard Speed</label><input type="number" id="dm-stdspeed" value="${existing?.stdSpeed||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
-        <div class="form-group"><label>EE Status</label><input type="text" id="dm-eestatus" value="${existing?.eeStatus||''}" placeholder="e.g. OK, Low, Machine Down" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
-        <div class="form-group"><label>Production Plan (Kg)</label><input type="number" id="dm-plankg" value="${existing?.planKg||0}" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text)"></div>
+  const fIn=(id,lbl,typ,val,ph)=>`<div class="form-group"><label style="font-size:10px;font-weight:700;color:var(--text3);display:block;margin-bottom:3px">${lbl}</label><input type="${typ||'number'}" id="${id}" value="${val??0}" placeholder="${ph||''}" style="width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12px;outline:none;box-sizing:border-box"></div>`;
+  const fTa=(id,lbl,val)=>`<div class="form-group" style="grid-column:span 2"><label style="font-size:10px;font-weight:700;color:var(--text3);display:block;margin-bottom:3px">${lbl}</label><textarea id="${id}" rows="2" style="width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12px;outline:none;resize:vertical;box-sizing:border-box">${val||''}</textarea></div>`;
+  const e=existing||{};
+  const html=`<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.8);z-index:9999;display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:20px;box-sizing:border-box" id="dm-form-overlay">
+    <div style="background:var(--bg2);border-radius:14px;padding:20px;max-width:680px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.5)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h3 style="font-family:'Rajdhani',sans-serif;margin:0;color:var(--cyan)">${editKey?'✏ Edit':'+ Add'} Daily Meeting — ${dept}</h3>
+        <button onclick="document.getElementById('dm-form-overlay').remove()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">✕</button>
       </div>
-      <div class="form-group" style="margin-top:10px"><label>Remarks</label><textarea id="dm-remarks" rows="2" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);resize:vertical">${existing?.remarks||''}</textarea></div>
-      <div id="dm-live-calc" style="margin-top:10px;font-size:11px;color:var(--text3);background:var(--bg3);border-radius:8px;padding:8px"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group"><label style="font-size:10px;font-weight:700;color:var(--text3);display:block;margin-bottom:3px">DATE *</label>
+          <input type="date" id="dm-date" value="${e.date||today}" style="width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12px;outline:none;box-sizing:border-box"></div>
+        <div class="form-group"><label style="font-size:10px;font-weight:700;color:var(--text3);display:block;margin-bottom:3px">MACHINE *</label>
+          <select id="dm-machine" style="width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12px;outline:none">
+            ${machines.map(m=>`<option ${e.machine===m?'selected':''}>${m}</option>`).join('')}
+          </select></div>
+        ${fIn('dm-meters','PRODUCTION METERS','number',e.meters||0)}
+        ${fIn('dm-prodkg','PRODUCTION KG','number',e.prodKg||0)}
+        ${fIn('dm-prodpcs','PRODUCTION PCS (Bag Making)','number',e.prodPcs||0)}
+        ${fIn('dm-totalmins','TOTAL MINS (default 1440)','number',e.totalMins||1440)}
+      </div>
+      <div style="font-size:10px;font-weight:700;color:var(--text3);margin:12px 0 8px;text-transform:uppercase;letter-spacing:.5px">⏱ Downtime Breakdown (Mins)</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;background:rgba(220,53,69,.05);border:1.5px solid rgba(220,53,69,.15);border-radius:8px;padding:10px">
+        ${fIn('dm-techdt','TECH DT','number',e.techDT||0)}
+        ${fIn('dm-plandt','PLAN DT','number',e.planDT||0)}
+        ${fIn('dm-unplandt','UNPLAN DT','number',e.unplanDT||0)}
+        ${fIn('dm-processdt','PROCESS DT (Job Setting)','number',e.processDT||0)}
+        ${fIn('dm-approvaldt','APPROVAL / MARKETING DT','number',e.approvalDT||0)}
+        <div id="dm-avail-preview" style="display:flex;align-items:center;justify-content:center;flex-direction:column;background:var(--bg3);border-radius:7px;padding:7px">
+          <div style="font-size:9px;color:var(--text3);font-weight:700">AVAIL TIME</div>
+          <div id="dm-avail-val" style="font-size:18px;font-weight:800;color:var(--green)">—</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+        ${fIn('dm-runmins','RUN MINS','number',e.runMins||0)}
+        ${fIn('dm-nojobs','NO. OF JOB SETTINGS','number',e.noJobs||0)}
+        ${fIn('dm-stdspeed','STANDARD SPEED (m/min)','number',e.stdSpeed||400)}
+        ${fIn('dm-plankg','PRODUCTION PLAN KG','number',e.planKg||0)}
+        ${fIn('dm-eestatus','EE STATUS','text',e.eeStatus||'','e.g. OK / Low / Down')}
+      </div>
+      <!-- Live calc preview -->
+      <div id="dm-live-calc" style="margin-top:10px;font-size:11px;color:var(--text3);background:var(--bg3);border-radius:8px;padding:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+        ${fTa('dm-processremarks','PROCESS DT REMARKS',e.processRemarks||'')}
+        ${fTa('dm-techremarks','TECHNICAL DT REMARKS',e.techRemarks||'')}
+        ${fTa('dm-remarks','GENERAL REMARKS',e.remarks||'')}
+      </div>
       <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="btn btn-primary" onclick="window.saveDailyMeetingRow('${dept}','${editKey||''}')">💾 Save</button>
-        <button class="btn btn-outline" onclick="document.getElementById('dm-form-overlay').remove()">Cancel</button>
+        <button onclick="window.saveDailyMeetingRow('${dept}','${editKey||''}')" style="background:var(--cyan);color:#fff;border:none;padding:9px 20px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">💾 Save Entry</button>
+        <button onclick="document.getElementById('dm-form-overlay').remove()" style="background:var(--bg3);border:1.5px solid var(--border);color:var(--text);padding:9px 16px;border-radius:8px;font-size:13px;cursor:pointer">Cancel</button>
       </div>
     </div>
   </div>`;
   document.body.insertAdjacentHTML('beforeend', html);
-  const updateLive=()=>{
-    const c=_dmCalc({
-      totalMins:document.getElementById('dm-totalmins').value, techDT:document.getElementById('dm-techdt').value,
-      planDT:document.getElementById('dm-plandt').value, runMins:document.getElementById('dm-runmins').value,
-      meters:document.getElementById('dm-meters').value, stdSpeed:document.getElementById('dm-stdspeed').value,
-      prodKg:document.getElementById('dm-prodkg').value, planKg:document.getElementById('dm-plankg').value
-    });
-    document.getElementById('dm-live-calc').innerHTML =
-      `Available Time: <b>${c.availTime.toFixed(0)}</b> min &nbsp;|&nbsp; Factor Mins: <b>${c.factorMins.toFixed(2)}</b> &nbsp;|&nbsp; `+
-      `Avg Speed: <b>${c.avgSpeed.toFixed(2)}</b> &nbsp;|&nbsp; EE%: <b>${c.eePct.toFixed(1)}%</b> &nbsp;|&nbsp; OEE%: <b>${c.oeePct.toFixed(1)}%</b> &nbsp;|&nbsp; Target vs Actual: <b>${c.targetVsActual}</b>`;
+  const deptForCalc = dept;
+  const gNum=function(id){return +(document.getElementById(id)?.value||0);};
+  const updateLive=function(){
+    var row={
+      totalMins:gNum('dm-totalmins'),techDT:gNum('dm-techdt'),planDT:gNum('dm-plandt'),
+      unplanDT:gNum('dm-unplandt'),processDT:gNum('dm-processdt'),approvalDT:gNum('dm-approvaldt'),
+      runMins:gNum('dm-runmins'),meters:gNum('dm-meters'),
+      stdSpeed:gNum('dm-stdspeed'),prodKg:gNum('dm-prodkg'),planKg:gNum('dm-plankg')
+    };
+    var c=_dmCalcV2(row,deptForCalc);
+    var av=document.getElementById('dm-avail-val');
+    if(av){av.textContent=Math.round(c.availTime)+' min';av.style.color=c.availTime>800?'var(--green)':c.availTime>400?'var(--orange)':'var(--red)';}
+    var lc=document.getElementById('dm-live-calc');
+    if(lc) lc.innerHTML=
+      '<div style="grid-column:span 1"><div style="font-size:9px;color:var(--text3);font-weight:700">AVAIL TIME</div><div style="font-size:14px;font-weight:800;color:var(--green)">'+Math.round(c.availTime)+' min</div></div>'+
+      '<div><div style="font-size:9px;color:var(--text3);font-weight:700">FACTOR MINS</div><div style="font-size:14px;font-weight:800;color:var(--text)">'+c.factorMins.toFixed(0)+'</div></div>'+
+      '<div><div style="font-size:9px;color:var(--text3);font-weight:700">EE %</div><div style="font-size:14px;font-weight:800;color:'+_dmEeColor(c.eePct)+'">'+c.eePct.toFixed(1)+'%</div></div>'+
+      '<div><div style="font-size:9px;color:var(--text3);font-weight:700">AVAIL %</div><div style="font-size:14px;font-weight:800;color:var(--text3)">'+c.availability.toFixed(1)+'%</div></div>'+
+      '<div><div style="font-size:9px;color:var(--text3);font-weight:700">PERF %</div><div style="font-size:14px;font-weight:800;color:var(--text3)">'+c.performance.toFixed(1)+'%</div></div>'+
+      '<div><div style="font-size:9px;color:var(--text3);font-weight:700">OEE = A×P×Q</div><div style="font-size:14px;font-weight:800;color:'+_dmOeeColor(c.oeePct)+'">'+c.oeePct.toFixed(1)+'%</div></div>';
   };
-  ['dm-totalmins','dm-techdt','dm-plandt','dm-runmins','dm-meters','dm-stdspeed','dm-prodkg','dm-plankg'].forEach(id=>{
-    document.getElementById(id).addEventListener('input', updateLive);
+  ['dm-totalmins','dm-techdt','dm-plandt','dm-unplandt','dm-processdt','dm-approvaldt',
+   'dm-runmins','dm-meters','dm-stdspeed','dm-prodkg','dm-plankg'].forEach(function(id){
+    var el=document.getElementById(id);if(el)el.addEventListener('input',updateLive);
   });
   updateLive();
 };
@@ -11711,18 +11804,26 @@ window.saveDailyMeetingRow=function(dept, editKey){
   const store = _dmLoad();
   const key = editKey || (date+'_'+machine.replace(/\s+/g,''));
   const month = (function(){ const d=new Date(date); return d.toLocaleString('en',{month:'short'})+'-'+String(d.getFullYear()).slice(2); })();
+  const gv=function(id,num){const e=document.getElementById(id);return e?(num?+e.value||0:e.value||''):(num?0:'');};
   store[key] = {
-    date, machine, dept, month,
-    meters:+document.getElementById('dm-meters').value||0,
-    prodKg:+document.getElementById('dm-prodkg').value||0,
-    totalMins:+document.getElementById('dm-totalmins').value||0,
-    techDT:+document.getElementById('dm-techdt').value||0,
-    planDT:+document.getElementById('dm-plandt').value||0,
-    runMins:+document.getElementById('dm-runmins').value||0,
-    stdSpeed:+document.getElementById('dm-stdspeed').value||0,
-    eeStatus:document.getElementById('dm-eestatus').value||'',
-    planKg:+document.getElementById('dm-plankg').value||0,
-    remarks:document.getElementById('dm-remarks').value||''
+    _key:key, date, machine, dept, month,
+    meters:     gv('dm-meters',1),
+    prodKg:     gv('dm-prodkg',1),
+    prodPcs:    gv('dm-prodpcs',1),
+    totalMins:  gv('dm-totalmins',1),
+    techDT:     gv('dm-techdt',1),
+    planDT:     gv('dm-plandt',1),
+    unplanDT:   gv('dm-unplandt',1),
+    processDT:  gv('dm-processdt',1),
+    approvalDT: gv('dm-approvaldt',1),
+    runMins:    gv('dm-runmins',1),
+    noJobs:     gv('dm-nojobs',1),
+    stdSpeed:   gv('dm-stdspeed',1),
+    planKg:     gv('dm-plankg',1),
+    eeStatus:   gv('dm-eestatus',0),
+    processRemarks: gv('dm-processremarks',0),
+    techRemarks:    gv('dm-techremarks',0),
+    remarks:        gv('dm-remarks',0)
   };
   _dmSave(store);
   document.getElementById('dm-form-overlay').remove();
@@ -11740,6 +11841,622 @@ window.deleteDailyMeetingRow=function(key, dept){
   const tc=document.getElementById('dept-tab-content');
   if(tc) renderDeptDailyMeetingTab(tc, dept);
 };
+// ═══════════════════════════════════════════════════════════════════════
+// DAILY MEETING TAB v2 — Date filter, Machine grouping, Drilldown,
+//                        Weekly Data tab with 2-column layout
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── Dept-wise factor (matches main EE engine) ─────────────────────────
+function _dmDeptFactor(dept){
+  if(!dept) return 1;
+  var d = dept.trim().toLowerCase();
+  if(d.includes('laminat')) return 0.75;
+  if(d.includes('slit'))    return 0.50;
+  if(d.includes('bag'))     return 0.75;
+  return 1.0;
+}
+
+// ── Recalculate all derived fields — matches CSV exactly ─────────────
+function _dmCalcV2(row, deptOverride){
+  var dept       = deptOverride || row.dept || '';
+  var isBag      = dept === 'Bag Making';
+  var factor     = _dmDeptFactor(dept);
+  var totalMins  = +row.totalMins  || 1440;
+  var techDT     = +row.techDT     || 0;
+  var planDT     = +row.planDT     || 0;
+  var unplanDT   = +row.unplanDT   || 0;
+  var mktDT      = +row.approvalDT || +row.mktDT || 0;
+  var processDT  = +row.processDT  || 0;
+  var runMins    = +row.runMins    || 0;
+  // Bag Making uses PCS, others use Meters
+  var prodVal    = isBag ? (+row.prodPcs||0) : (+row.meters||0);
+  var stdSpeed   = +row.stdSpeed   || 400;
+  var prodKg     = +row.prodKg     || 0;
+  var planKg     = +row.planKg     || 0;
+
+  // ── Available Time = Total − Tech − Plan − Unplan − Mkt − Process ─
+  var availTime  = totalMins - techDT - planDT - unplanDT - mktDT - processDT;
+
+  // ── Factor Mins = Run Mins × Dept Factor ─────────────────────────
+  // Printing=1.0, Lamination=0.75, Slitting=0.5, Bag Making=0.75
+  var factorMins = runMins * factor;
+
+  // ── Avg Speed = Production ÷ Factor Mins ─────────────────────────
+  var avgSpeed   = factorMins > 0 ? (prodVal / factorMins) : 0;
+
+  // ── EE% = Performance% = Avg Speed ÷ Std Speed × 100 ────────────
+  var eePct      = (stdSpeed > 0 && avgSpeed > 0) ? (avgSpeed / stdSpeed * 100) : 0;
+
+  // ── Availability% = Run Mins ÷ Avail Time × 100 ──────────────────
+  var availPct   = availTime > 0 ? (runMins / availTime * 100) : 0;
+
+  // ── Performance% = EE% (same) ────────────────────────────────────
+  var perfPct    = eePct;
+
+  // ── Quality% = 100% (no NCR data yet) ────────────────────────────
+  var qualPct    = 100;
+
+  // ── OEE% = Availability% × Performance% ÷ 100 ───────────────────
+  var oeePct     = (availPct * perfPct) / 100;
+
+  var tgtVsAct   = planKg > 0 ? (prodKg / planKg * 100) : 0;
+
+  return {
+    availTime, factorMins, avgSpeed,
+    eePct, availPct, perfPct, qualPct, oeePct,
+    // legacy aliases
+    availability: +availPct.toFixed(2),
+    performance:  +perfPct.toFixed(2),
+    quality:      +qualPct.toFixed(2),
+    tgtVsAct, factor, isBag, prodVal
+  };
+}
+
+// ── State per dept ────────────────────────────────────────────────────
+var _dmState = {};
+function _dmGetState(dept){
+  if(!_dmState[dept]) _dmState[dept] = {
+    view: 'machine',  // 'machine' | 'date' | 'job'
+    selectedMachine: null,
+    selectedDate: null,
+    dmTab: 'daily',   // 'daily' | 'weekly'
+    fromDate: '',
+    toDate: '',
+    filterMonth: '',
+  };
+  return _dmState[dept];
+}
+
+// ── Helper: format date ───────────────────────────────────────────────
+function _dmFmtDate(iso){
+  if(!iso) return '—';
+  try{
+    var p=iso.split('-');
+    var months=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    return p[2]+'-'+months[+p[1]-1]+'-'+p[0];
+  }catch(e){ return iso; }
+}
+
+// ── Get all rows for dept, apply date filter ──────────────────────────
+function _dmGetRows(dept, state){
+  var store = _dmLoad();
+  var all = Object.values(store).filter(function(r){ return r.dept===dept||r.machine; });
+  // Filter by dept if dept stored on row
+  if(dept) all = Object.values(store).filter(function(r){ return r.dept===dept; });
+  // Date filter
+  if(state.fromDate) all = all.filter(function(r){ return (r.date||'')>=state.fromDate; });
+  if(state.toDate)   all = all.filter(function(r){ return (r.date||'')<=state.toDate; });
+  if(state.filterMonth) all = all.filter(function(r){ return (r.date||'').slice(0,7)===state.filterMonth; });
+  return all.sort(function(a,b){ return (a.date||'') < (b.date||'') ? -1 : 1; });
+}
+
+// ── Color helpers ─────────────────────────────────────────────────────
+function _dmEeColor(v){ return v>=80?'var(--green)':v>=65?'var(--orange)':'var(--red)'; }
+function _dmOeeColor(v){ return v>=70?'var(--green)':v>=50?'var(--orange)':'var(--red)'; }
+function _dmN(v,d){ return (+(v||0)).toFixed(d||0); }
+
+// ═══════════════════════════════════════════════════════════════════════
+// MAIN RENDER — Daily Meeting Tab
+// ═══════════════════════════════════════════════════════════════════════
+function renderDeptDailyMeetingTab(tc, dept){
+  if(!tc) return;
+  var state = _dmGetState(dept);
+  var today = new Date().toISOString().slice(0,10);
+  if(!state.fromDate && !state.toDate && !state.filterMonth) state.fromDate = state.toDate = today;
+
+  var _dTab=state.dmTab==='daily';
+  tc.innerHTML=
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">'+
+      '<div><div style="font-size:15px;font-weight:700;color:var(--text)">📋 Daily Meeting — '+dept+'</div>'+
+      '<div style="font-size:11px;color:var(--text3);margin-top:2px">Daily OEE &amp; EE Details • Auto-calculated</div></div>'+
+      '<button onclick="window.openDailyMeetingForm(\''+dept+'\')" style="background:var(--cyan);color:#fff;border:none;padding:7px 16px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">+ Add Entry</button>'+
+    '</div>'+
+    '<div style="display:flex;gap:6px;margin-bottom:12px;border-bottom:2px solid var(--border);padding-bottom:8px">'+
+      '<button id="dm-tab-daily-'+dept+'" onclick="window._dmSwitchTab(\''+dept+'\',\'daily\')" style="padding:7px 16px;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;'+(_dTab?'background:var(--cyan);color:#fff':'background:var(--bg3);color:var(--text)')+'">📊 Daily Data</button>'+
+      '<button id="dm-tab-weekly-'+dept+'" onclick="window._dmSwitchTab(\''+dept+'\',\'weekly\')" style="padding:7px 16px;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;'+(!_dTab?'background:var(--cyan);color:#fff':'background:var(--bg3);color:var(--text)')+'">📅 Weekly Data</button>'+
+    '</div>'+
+    '<div id="dm-body-'+dept+'"></div>';
+  window._dmRenderBody(dept);
+}
+
+window._dmSwitchTab = function(dept, tab){
+  var state = _dmGetState(dept);
+  state.dmTab = tab;
+  state.view = 'machine';
+  state.selectedMachine = null;
+  state.selectedDate = null;
+  window._dmRenderBody(dept);
+  // Update button styles
+  var daily = document.getElementById('dm-tab-daily-'+dept);
+  var weekly = document.getElementById('dm-tab-weekly-'+dept);
+  if(daily){ daily.style.background=tab==='daily'?'var(--cyan)':'var(--bg3)'; daily.style.color=tab==='daily'?'#fff':'var(--text)'; }
+  if(weekly){ weekly.style.background=tab==='weekly'?'var(--cyan)':'var(--bg3)'; weekly.style.color=tab==='weekly'?'#fff':'var(--text)'; }
+};
+
+window._dmRenderBody = function(dept){
+  var state = _dmGetState(dept);
+  var body = document.getElementById('dm-body-'+dept); if(!body) return;
+  if(state.dmTab === 'weekly') { window._dmRenderWeekly(dept, body); return; }
+  window._dmRenderDaily(dept, body);
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+// DAILY TAB — Machine grouped → Date drilldown → Job drilldown
+// ═══════════════════════════════════════════════════════════════════════
+window._dmRenderDaily = function(dept, body){
+  var state = _dmGetState(dept);
+  var today = new Date().toISOString().slice(0,10);
+
+  // Date filters
+  var inp='background:var(--bg3);border:1.5px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:11px;outline:none';
+  var filterBar =
+    '<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:12px">'+
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'+
+        '<label style="font-size:10px;font-weight:700;color:var(--text3)">FROM</label>'+
+        '<input type="date" id="dm-from-'+dept+'" value="'+(state.fromDate||today)+'" onchange="window._dmApplyFilter(\''+dept+'\')" style="'+inp+'">'+
+        '<label style="font-size:10px;font-weight:700;color:var(--text3)">TO</label>'+
+        '<input type="date" id="dm-to-'+dept+'" value="'+(state.toDate||today)+'" onchange="window._dmApplyFilter(\''+dept+'\')" style="'+inp+'">'+
+        '<button onclick="window._dmPreset(\''+dept+'\',\'today\')" style="'+_dmPresetStyle()+'">Today</button>'+
+        '<button onclick="window._dmPreset(\''+dept+'\',\'week\')" style="'+_dmPresetStyle()+'">This Week</button>'+
+        '<button onclick="window._dmPreset(\''+dept+'\',\'month\')" style="'+_dmPresetStyle()+'">This Month</button>'+
+        '<button onclick="window._dmPreset(\''+dept+'\',\'lastweek\')" style="'+_dmPresetStyle()+'">Last Week</button>'+
+        '<button onclick="window._dmClearFilter(\''+dept+'\')" style="'+_dmPresetStyle(true)+'">✕ Clear</button>'+
+      '</div>'+
+    '</div>';
+
+  body.innerHTML = filterBar + '<div id="dm-content-'+dept+'"></div>';
+  window._dmRenderView(dept);
+};
+
+function _dmPresetStyle(red){
+  return 'background:var(--bg3);border:1.5px solid var(--border);color:'+(red?'var(--red)':'var(--text)')+';padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer';
+}
+window._dmApplyFilter = function(dept){
+  var state = _dmGetState(dept);
+  state.fromDate = document.getElementById('dm-from-'+dept)?.value||'';
+  state.toDate   = document.getElementById('dm-to-'+dept)?.value||'';
+  state.filterMonth = '';
+  state.view = 'machine'; state.selectedMachine = null; state.selectedDate = null;
+  window._dmRenderView(dept);
+};
+window._dmClearFilter = function(dept){
+  var state = _dmGetState(dept);
+  state.fromDate = state.toDate = state.filterMonth = '';
+  var f=document.getElementById('dm-from-'+dept); var t=document.getElementById('dm-to-'+dept);
+  if(f)f.value=''; if(t)t.value='';
+  state.view = 'machine'; window._dmRenderView(dept);
+};
+window._dmPreset = function(dept, preset){
+  var today=new Date(); var ymd=function(d){return d.toISOString().slice(0,10);};
+  var from,to;
+  if(preset==='today'){from=to=ymd(today);}
+  else if(preset==='week'){var m=new Date(today);m.setDate(today.getDate()-((today.getDay()||7)-1));from=ymd(m);to=ymd(today);}
+  else if(preset==='lastweek'){var l=new Date(today);l.setDate(today.getDate()-((today.getDay()||7)-1)-7);var le=new Date(l);le.setDate(l.getDate()+6);from=ymd(l);to=ymd(le);}
+  else if(preset==='month'){from=ymd(new Date(today.getFullYear(),today.getMonth(),1));to=ymd(today);}
+  var state=_dmGetState(dept);
+  state.fromDate=from;state.toDate=to;state.filterMonth='';
+  state.view='machine';state.selectedMachine=null;state.selectedDate=null;
+  var fe=document.getElementById('dm-from-'+dept);var te=document.getElementById('dm-to-'+dept);
+  if(fe)fe.value=from;if(te)te.value=to;
+  window._dmRenderView(dept);
+};
+
+window._dmRenderView = function(dept){
+  var state  = _dmGetState(dept);
+  var con    = document.getElementById('dm-content-'+dept); if(!con) return;
+  var rows   = _dmGetRows(dept, state);
+
+  if(state.view === 'machine'){ window._dmViewMachine(dept, rows, con); return; }
+  if(state.view === 'date'   ){ window._dmViewDate(dept, rows, con); return; }
+  if(state.view === 'job'    ){ window._dmViewJob(dept, rows, con); return; }
+};
+
+// ── VIEW 1: Group by Machine ───────────────────────────────────────────
+window._dmViewMachine = function(dept, rows, con){
+  if(!rows.length){
+    con.innerHTML='<div style="text-align:center;padding:30px;color:var(--text3)">No data for selected range. Click <b>+ Add Entry</b> to start.</div>';
+    return;
+  }
+  // Group by machine
+  var machines = {};
+  rows.forEach(function(r){
+    var m=r.machine||'Unknown';
+    if(!machines[m]) machines[m]={rows:[],totMeters:0,totProd:0,totKg:0,totRun:0,totAvail:0,totFactor:0,avgStd:400,eeSum:0,oeeSum:0,cnt:0};
+    var c=_dmCalcV2(r,dept);
+    machines[m].rows.push(r);
+    var isBagM = (dept==='Bag Making');
+    machines[m].totMeters+=+r.meters||0;
+    machines[m].totProd  +=(isBagM?+r.prodPcs:+r.meters)||0;
+    machines[m].totKg    +=+r.prodKg||0;
+    machines[m].totRun   +=+r.runMins||0;
+    machines[m].totAvail +=c.availTime||0;
+    machines[m].totFactor+=c.factorMins||0;
+    machines[m].avgStd    =+r.stdSpeed||400;
+    machines[m].eeSum    +=c.eePct||0;
+    machines[m].oeeSum   +=c.oeePct||0;
+    machines[m].cnt++;
+  });
+
+  var isBM = dept==='Bag Making';
+  var thCols=['MACHINE','DAYS',isBM?'PRODUCTION (PCS)':'PROD METERS','PROD KG','AVG EE%','AVAIL %','PERF %','OEE%','DRILLDOWN'];
+  var th='<tr style="background:var(--bg3)">'+thCols.map(function(c){return '<th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">'+c+'</th>';}).join('')+'</tr>';
+
+
+
+  var tbody=Object.keys(machines).sort().map(function(mach){
+    var g=machines[mach];
+    var avgEE =(g.eeSum/g.cnt).toFixed(1);
+    var avgOEE=(g.oeeSum/g.cnt).toFixed(1);
+    var avgAv =(g.totAvail/g.cnt).toFixed(0);
+    var _dSet={}; g.rows.forEach(function(r){_dSet[r.date||'']=1;}); var days=Object.keys(_dSet).length;
+    var avgAvail = g.cnt>0 ? (g.totRun/g.totAvail*100).toFixed(1) : '—';
+    var avgPerf  = g.cnt>0 && g.totFactor>0 ? (g.totProd/g.totFactor/g.avgStd*100).toFixed(1) : '—';
+    return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="window._dmDrillMachine(\''+dept+'\',\''+mach+'\')">'+
+      '<td style="padding:8px 10px;font-weight:700;color:var(--cyan)">'+mach+'</td>'+
+      '<td style="padding:8px 10px">'+days+'</td>'+
+      '<td style="padding:8px 10px">'+Math.round(g.totProd||g.totMeters).toLocaleString()+'</td>'+
+      '<td style="padding:8px 10px;font-weight:600">'+Math.round(g.totKg).toLocaleString()+' KG</td>'+
+      '<td style="padding:8px 10px;font-weight:700;color:'+_dmEeColor(+avgEE)+'">'+avgEE+'%</td>'+
+      '<td style="padding:8px 10px;color:var(--text3)">'+avgAvail+'%</td>'+
+      '<td style="padding:8px 10px;color:var(--text3)">'+avgPerf+'%</td>'+
+      '<td style="padding:8px 10px;font-weight:700;color:'+_dmOeeColor(+avgOEE)+'">'+avgOEE+'%</td>'+
+      '<td style="padding:8px 10px"><span style="color:var(--cyan);font-size:11px;font-weight:700">📅 Date Wise →</span></td>'+
+    '</tr>';
+  }).join('');
+
+  con.innerHTML='<div style="overflow-x:auto;border:1.5px solid var(--border);border-radius:10px">'+
+    '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+      '<thead>'+th+'</thead><tbody>'+tbody+'</tbody>'+
+    '</table></div>';
+};
+
+window._dmDrillMachine = function(dept, mach){
+  var state=_dmGetState(dept);
+  state.selectedMachine=mach; state.view='date'; state.selectedDate=null;
+  window._dmRenderView(dept);
+};
+
+// ── VIEW 2: Date-wise for selected machine ─────────────────────────────
+window._dmViewDate = function(dept, rows, con){
+  var state = _dmGetState(dept);
+  var mach  = state.selectedMachine;
+  var mrows = rows.filter(function(r){return r.machine===mach;});
+
+  var isBMD = dept==='Bag Making';
+  var thCols2=['DATE',isBMD?'PROD PCS':'PROD MTR','PROD KG','TECH DT','PLAN DT','UNPLAN DT','AVAIL TIME','RUN MINS','FACTOR MINS','AVG SPEED','EE%','AVAIL%','PERF%','OEE%','DRILLDOWN'];
+  var th='<tr style="background:var(--bg3)">'+thCols2.map(function(c){return '<th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">'+c+'</th>';}).join('')+'</tr>';
+
+
+
+  // Group by date
+  var dates={};
+  mrows.forEach(function(r){
+    var d=r.date||'Unknown';
+    if(!dates[d]) dates[d]={rows:[],totMeters:0,totProd:0,totKg:0,totRun:0,totAvail:0,totTechDT:0,totPlanDT:0,totUnplanDT:0,totFactor:0,avgStd:400,eeSum:0,availSum:0,perfSum:0,oeeSum:0,cnt:0};
+    var c=_dmCalcV2(r,dept);
+    dates[d].rows.push(r);
+    dates[d].totMeters  +=+r.meters||0;
+    dates[d].totKg      +=+r.prodKg||0;
+    dates[d].totRun     +=+r.runMins||0;
+    dates[d].totAvail   +=c.availTime||0;
+    dates[d].totTechDT  +=+r.techDT||0;
+    dates[d].totPlanDT  +=+r.planDT||0;
+    dates[d].totUnplanDT+=+r.unplanDT||0;
+    dates[d].totFactor  +=c.factorMins||0;
+    dates[d].totProd    +=(dept==='Bag Making'?+r.prodPcs:+r.meters)||0;
+    dates[d].avgStd      =+r.stdSpeed||400;
+    dates[d].eeSum      +=c.eePct||0;
+    dates[d].availSum   +=c.availability||0;
+    dates[d].perfSum    +=c.performance||0;
+    dates[d].oeeSum     +=c.oeePct||0;
+    dates[d].cnt++;
+  });
+
+  var tbody=Object.keys(dates).sort().map(function(dt){
+    var g=dates[dt];
+    var avgEE=(g.eeSum/g.cnt).toFixed(1);
+    var avgOEE=(g.oeeSum/g.cnt).toFixed(1);
+    return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="window._dmDrillDate(\''+dept+'\',\''+dt+'\')">'+
+      '<td style="padding:8px 10px;font-weight:700;white-space:nowrap">'+_dmFmtDate(dt)+'</td>'+
+      '<td style="padding:8px 10px">'+Math.round(g.totProd||g.totMeters).toLocaleString()+'</td>'+
+      '<td style="padding:8px 10px;font-weight:600">'+Math.round(g.totKg).toLocaleString()+' KG</td>'+
+      '<td style="padding:8px 10px;color:var(--red)">'+Math.round(g.totTechDT)+'</td>'+
+      '<td style="padding:8px 10px;color:var(--orange)">'+Math.round(g.totPlanDT)+'</td>'+
+      '<td style="padding:8px 10px;color:var(--yellow,#eab308)">'+Math.round(g.totUnplanDT)+'</td>'+
+      '<td style="padding:8px 10px">'+Math.round(g.totAvail)+'</td>'+
+      '<td style="padding:8px 10px;color:var(--green)">'+Math.round(g.totRun)+'</td>'+
+      '<td style="padding:8px 10px">'+Math.round(g.totFactor)+'</td>'+
+      '<td style="padding:8px 10px">'+_dmN(g.totFactor>0?g.totMeters/g.totFactor:0,2)+'</td>'+
+      '<td style="padding:8px 10px;font-weight:700;color:'+_dmEeColor(+avgEE)+'">'+avgEE+'%</td>'+
+      '<td style="padding:8px 10px;color:var(--text3)">'+(g.cnt>0?(g.availSum/g.cnt).toFixed(1):'—')+'%</td>'+
+      '<td style="padding:8px 10px;color:var(--text3)">'+(g.cnt>0?(g.perfSum/g.cnt).toFixed(1):'—')+'%</td>'+
+      '<td style="padding:8px 10px;font-weight:700;color:'+_dmOeeColor(+avgOEE)+'">'+avgOEE+'%</td>'+
+      '<td style="padding:8px 10px"><span style="color:var(--cyan);font-size:11px;font-weight:700">📋 Jobs →</span></td>'
+    '</tr>';
+  }).join('');
+
+  con.innerHTML=
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'+
+      '<button onclick="window._dmBack(\''+dept+'\',\'machine\')" style="background:var(--bg3);border:1.5px solid var(--border);color:var(--text);padding:5px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">← Back</button>'+
+      '<div style="font-size:13px;font-weight:700;color:var(--cyan)">'+mach+' — Date Wise</div>'+
+    '</div>'+
+    '<div style="overflow-x:auto;border:1.5px solid var(--border);border-radius:10px">'+
+      '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+        '<thead>'+th+'</thead><tbody>'+tbody+'</tbody>'+
+      '</table></div>';
+};
+
+window._dmDrillDate = function(dept, dt){
+  var state=_dmGetState(dept);
+  state.selectedDate=dt; state.view='job';
+  window._dmRenderView(dept);
+};
+
+// ── VIEW 3: Job-wise for selected machine + date ───────────────────────
+window._dmViewJob = function(dept, rows, con){
+  var state = _dmGetState(dept);
+  var jrows = rows.filter(function(r){
+    return r.machine===state.selectedMachine && r.date===state.selectedDate;
+  });
+
+  var isBagDept = dept==='Bag Making';
+  var cols=['Date','Machine',isBagDept?'Production (PCS)':'Production (Mtr)','Prod KG',
+    'Total Mins','Tech DT','Plan DT','Unplan DT','Process DT','Approval DT',
+    'Avail Time','Run Mins','Factor Mins','No.Jobs','Avg Speed','Std Speed',
+    'EE%','Avail %','Perf %','Quality %','OEE%','Plan KG','Tgt vs Act','Process Remarks','Tech Remarks','Actions'];
+  var th='<tr style="background:var(--bg3)">'+cols.map(function(c){
+    return '<th style="padding:7px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--text3);white-space:nowrap">'+c+'</th>';
+  }).join('')+'</tr>';
+
+  var tbody = jrows.map(function(r){
+    var c=_dmCalcV2(r,dept);
+    return '<tr style="border-bottom:1px solid var(--border)">'+
+      '<td style="padding:7px 8px;white-space:nowrap">'+_dmFmtDate(r.date)+'</td>'+
+      '<td style="padding:7px 8px;color:var(--cyan);font-weight:700">'+( r.machine||'—')+'</td>'+
+      '<td style="padding:7px 8px">'+Math.round(isBagDept?(+r.prodPcs||0):(+r.meters||0)).toLocaleString()+'</td>'+
+      '<td style="padding:7px 8px;font-weight:600">'+Math.round(+r.prodKg||0).toLocaleString()+'</td>'+
+      '<td style="padding:7px 8px">'+Math.round(+r.prodPcs||0).toLocaleString()+'</td>'+
+      '<td style="padding:7px 8px">'+( r.totalMins||1440)+'</td>'+
+      '<td style="padding:7px 8px;color:var(--red)">'+( r.techDT||0)+'</td>'+
+      '<td style="padding:7px 8px;color:var(--orange)">'+( r.planDT||0)+'</td>'+
+      '<td style="padding:7px 8px">'+( r.unplanDT||0)+'</td>'+
+      '<td style="padding:7px 8px">'+( r.processDT||0)+'</td>'+
+      '<td style="padding:7px 8px">'+( r.approvalDT||0)+'</td>'+
+      '<td style="padding:7px 8px;font-weight:600;color:var(--green)">'+_dmN(c.availTime)+'</td>'+
+      '<td style="padding:7px 8px">'+( r.runMins||0)+'</td>'+
+      '<td style="padding:7px 8px">'+_dmN(c.factorMins,1)+'</td>'+
+      '<td style="padding:7px 8px">'+( r.noJobs||0)+'</td>'+
+      '<td style="padding:7px 8px">'+_dmN(c.avgSpeed,2)+'</td>'+
+      '<td style="padding:7px 8px">'+( r.stdSpeed||400)+'</td>'+
+      '<td style="padding:7px 8px;font-weight:700;color:'+_dmEeColor(c.eePct)+'">'+_dmN(c.eePct,2)+'%</td>'+
+      '<td style="padding:7px 8px;font-size:10px;color:var(--text3)">'+_dmN(c.availability,1)+'%</td>'+
+      '<td style="padding:7px 8px;font-size:10px;color:var(--text3)">'+_dmN(c.performance,1)+'%</td>'+
+      '<td style="padding:7px 8px;font-size:10px;color:var(--text3)">'+_dmN(c.quality,1)+'%</td>'+
+      '<td style="padding:7px 8px;font-weight:700;color:'+_dmOeeColor(c.oeePct)+'">'+_dmN(c.oeePct,2)+'%</td>'+
+      '<td style="padding:7px 8px">'+Math.round(+r.planKg||0).toLocaleString()+'</td>'+
+      '<td style="padding:7px 8px;color:'+(c.tgtVsAct<=0?'var(--green)':'var(--red)')+';font-weight:600">'+_dmN(Math.abs(c.tgtVsAct))+'</td>'+
+      '<td style="padding:7px 8px;font-size:10px;max-width:140px;white-space:normal;color:var(--text3)">'+(r.processRemarks||'—')+'</td>'+
+      '<td style="padding:7px 8px;font-size:10px;max-width:140px;white-space:normal;color:var(--text3)">'+(r.techRemarks||'—')+'</td>'+
+      '<td style="padding:7px 8px;white-space:nowrap">'+
+        '<button onclick="window.openDailyMeetingForm(\''+dept+'\',\''+r._key+'\')" style="background:rgba(255,193,7,.15);color:#856404;border:1px solid rgba(255,193,7,.3);padding:3px 7px;border-radius:5px;font-size:11px;cursor:pointer;margin-right:3px">✏</button>'+
+        ((window.isMainAdmin&&window.isMainAdmin())?'<button onclick="window.deleteDailyMeetingRow(\''+r._key+'\',\''+dept+'\')" style="background:rgba(220,53,69,.15);color:#dc3545;border:1px solid rgba(220,53,69,.3);padding:3px 7px;border-radius:5px;font-size:11px;cursor:pointer">🗑</button>':'')+
+      '</td>'+
+    '</tr>';
+  }).join('') || '<tr><td colspan="24" style="text-align:center;padding:20px;color:var(--text3)">No entries for this date.</td></tr>';
+
+  con.innerHTML=
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'+
+      '<button onclick="window._dmBack(\''+dept+'\',\'date\')" style="background:var(--bg3);border:1.5px solid var(--border);color:var(--text);padding:5px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">← Back</button>'+
+      '<div style="font-size:13px;font-weight:700;color:var(--cyan)">'+state.selectedMachine+' — '+_dmFmtDate(state.selectedDate)+' — Job Detail</div>'+
+      '<button onclick="window.openDailyMeetingForm(\''+dept+'\')" style="background:var(--green);color:#fff;border:none;padding:5px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-left:auto">+ Add</button>'+
+    '</div>'+
+    '<div style="overflow-x:auto;border:1.5px solid var(--border);border-radius:10px">'+
+      '<table style="width:100%;border-collapse:collapse;font-size:11px;min-width:1800px">'+
+        '<thead>'+th+'</thead><tbody>'+tbody+'</tbody>'+
+      '</table></div>';
+};
+
+window._dmBack = function(dept, view){
+  var state=_dmGetState(dept);
+  state.view=view;
+  if(view==='machine') state.selectedMachine=null;
+  state.selectedDate=null;
+  window._dmRenderView(dept);
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+// WEEKLY DATA TAB — 2-column layout, From/To + Monthly filter
+// ═══════════════════════════════════════════════════════════════════════
+window._dmRenderWeekly = function(dept, body){
+  var state = _dmGetState(dept);
+  var today = new Date();
+  var ymd = function(d){ return d.toISOString().slice(0,10); };
+  // Default: current week
+  if(!state.wFrom && !state.wTo && !state.wMonth){
+    var mon = new Date(today); mon.setDate(today.getDate()-((today.getDay()||7)-1));
+    var sun = new Date(mon); sun.setDate(mon.getDate()+6);
+    state.wFrom = ymd(mon); state.wTo = ymd(sun);
+  }
+
+  // Build month options
+  var store = _dmLoad();
+  var allRows = Object.values(store).filter(function(r){ return r.dept===dept; });
+  var _mSet={}; allRows.forEach(function(r){var m=(r.date||'').slice(0,7);if(m)_mSet[m]=1;}); var months=Object.keys(_mSet).sort().reverse();
+  var monthOpts = '<option value="">— Select Month —</option>' +
+    months.map(function(m){
+      return '<option value="'+m+'"'+(state.wMonth===m?' selected':'')+'>'+m+'</option>';
+    }).join('');
+
+  var inp2='background:var(--bg3);border:1.5px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:11px;outline:none';
+  body.innerHTML=
+    '<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:12px">'+
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">'+
+        '<div style="display:flex;flex-direction:column;gap:6px">'+
+          '<div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase">Option 1 — Date Range</div>'+
+          '<div style="display:flex;gap:8px;align-items:center">'+
+            '<label style="font-size:10px;color:var(--text3)">FROM</label>'+
+            '<input type="date" id="dm-w-from-'+dept+'" value="'+(state.wFrom||'')+'" style="'+inp2+'">'+
+            '<label style="font-size:10px;color:var(--text3)">TO</label>'+
+            '<input type="date" id="dm-w-to-'+dept+'" value="'+(state.wTo||'')+'" style="'+inp2+'">'+
+            '<button onclick="window._dmWeeklyRange(\''+dept+'\')" style="background:var(--cyan);color:#fff;border:none;padding:5px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Apply</button>'+
+          '</div>'+
+        '</div>'+
+        '<div style="width:1px;height:40px;background:var(--border);align-self:center"></div>'+
+        '<div style="display:flex;flex-direction:column;gap:6px">'+
+          '<div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase">Option 2 — Monthly Filter</div>'+
+          '<div style="display:flex;gap:8px;align-items:center">'+
+            '<select id="dm-w-month-'+dept+'" style="'+inp2+'">'+monthOpts+'</select>'+
+            '<button onclick="window._dmWeeklyMonth(\''+dept+'\')" style="background:var(--purple);color:#fff;border:none;padding:5px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Apply</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    '<div id="dm-w-content-'+dept+'"></div>';
+  window._dmWeeklyRender(dept);
+};
+
+window._dmWeeklyRange = function(dept){
+  var state=_dmGetState(dept);
+  state.wFrom  = document.getElementById('dm-w-from-'+dept)?.value||'';
+  state.wTo    = document.getElementById('dm-w-to-'+dept)?.value||'';
+  state.wMonth = '';
+  window._dmWeeklyRender(dept);
+};
+window._dmWeeklyMonth = function(dept){
+  var state=_dmGetState(dept);
+  state.wMonth = document.getElementById('dm-w-month-'+dept)?.value||'';
+  state.wFrom  = state.wTo = '';
+  window._dmWeeklyRender(dept);
+};
+
+window._dmWeeklyRender = function(dept){
+  var state = _dmGetState(dept);
+  var con   = document.getElementById('dm-w-content-'+dept); if(!con) return;
+  var store = _dmLoad();
+  var all   = Object.values(store).filter(function(r){ return r.dept===dept; });
+
+  // Apply filters
+  if(state.wMonth){
+    all = all.filter(function(r){ return (r.date||'').slice(0,7)===state.wMonth; });
+  } else {
+    if(state.wFrom) all = all.filter(function(r){ return (r.date||'')>=state.wFrom; });
+    if(state.wTo)   all = all.filter(function(r){ return (r.date||'')<=state.wTo; });
+  }
+
+  if(!all.length){
+    con.innerHTML='<div style="text-align:center;padding:30px;color:var(--text3)">No data for selected filter.</div>';
+    return;
+  }
+
+  // Group by machine for 2-column layout
+  var machMap = {};
+  all.forEach(function(r){
+    var m=r.machine||'Unknown';
+    if(!machMap[m]) machMap[m]=[];
+    machMap[m].push(r);
+  });
+
+  var machines = Object.keys(machMap).sort();
+
+  // Build 2-column card grid
+  var cards = '';
+  machines.forEach(function(mach){
+    var mrows = machMap[mach].sort(function(a,b){return (a.date||'')<(b.date||'')?-1:1;});
+    // Summary totals
+    var totM=0,totKg=0,totRun=0,totAvail=0,eeSum=0,oeeSum=0,cnt=0;
+    mrows.forEach(function(r){
+      var c=_dmCalcV2(r,dept);
+      totM    +=+r.meters||0;
+      totKg   +=+r.prodKg||0;
+      totRun  +=+r.runMins||0;
+      totAvail+=c.availTime||0;
+      eeSum   +=c.eePct||0;
+      oeeSum  +=c.oeePct||0;
+      cnt++;
+    });
+    var avgEE =cnt?(eeSum/cnt).toFixed(1):'—';
+    var avgOEE=cnt?(oeeSum/cnt).toFixed(1):'—';
+
+    // Date-wise rows inside card
+    var rows='';
+    mrows.forEach(function(r){
+      var c=_dmCalcV2(r,dept);
+      rows+='<tr style="border-bottom:1px solid var(--border)">'+
+        '<td style="padding:5px 8px;font-size:10px;white-space:nowrap">'+_dmFmtDate(r.date)+'</td>'+
+        '<td style="padding:5px 8px;text-align:right;font-size:10px">'+Math.round(+r.meters||0).toLocaleString()+'</td>'+
+        '<td style="padding:5px 8px;text-align:right;font-size:10px;font-weight:600">'+Math.round(+r.prodKg||0)+'</td>'+
+        '<td style="padding:5px 8px;text-align:right;font-size:10px;color:var(--red)">'+( r.techDT||0)+'</td>'+
+        '<td style="padding:5px 8px;text-align:right;font-size:10px">'+_dmN(c.availTime)+'</td>'+
+        '<td style="padding:5px 8px;text-align:right;font-size:10px;font-weight:700;color:'+_dmEeColor(c.eePct)+'">'+_dmN(c.eePct,1)+'%</td>'+
+        '<td style="padding:5px 8px;text-align:right;font-size:10px;font-weight:700;color:'+_dmOeeColor(c.oeePct)+'">'+_dmN(c.oeePct,1)+'%</td>'+
+      '</tr>';
+    });
+
+    cards+=
+      '<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:10px;overflow:hidden">'+
+        // Card header
+        '<div style="background:var(--bg3);padding:10px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">'+
+          '<div style="font-size:13px;font-weight:700;color:var(--cyan)">'+mach+'</div>'+
+          '<div style="display:flex;gap:12px">'+
+            '<span style="font-size:11px;color:var(--text3)">'+cnt+' day(s)</span>'+
+            '<span style="font-size:11px;font-weight:700;color:'+_dmEeColor(+avgEE)+'">EE: '+avgEE+'%</span>'+
+            '<span style="font-size:11px;font-weight:700;color:'+_dmOeeColor(+avgOEE)+'">OEE: '+avgOEE+'%</span>'+
+          '</div>'+
+        '</div>'+
+        // Summary strip
+        '<div style="display:grid;grid-template-columns:repeat(3,1fr);padding:8px 14px;gap:6px;border-bottom:1px solid var(--border)">'+
+          '<div><div style="font-size:9px;color:var(--text3);font-weight:700">TOTAL METERS</div><div style="font-size:14px;font-weight:700;color:var(--text)">'+Math.round(totM).toLocaleString()+'</div></div>'+
+          '<div><div style="font-size:9px;color:var(--text3);font-weight:700">TOTAL KG</div><div style="font-size:14px;font-weight:700;color:var(--green)">'+Math.round(totKg).toLocaleString()+'</div></div>'+
+          '<div><div style="font-size:9px;color:var(--text3);font-weight:700">RUN MINS</div><div style="font-size:14px;font-weight:700;color:var(--text)">'+Math.round(totRun).toLocaleString()+'</div></div>'+
+        '</div>'+
+        // Date rows table
+        '<div style="overflow-x:auto">'+
+          '<table style="width:100%;border-collapse:collapse">'+
+            '<thead><tr style="background:var(--bg3)">'+
+              ['DATE','METERS','KG','TECH DT','AVAIL','EE%','OEE%'].map(function(h){
+                return '<th style="padding:5px 8px;text-align:left;font-size:9px;font-weight:700;color:var(--text3)">'+h+'</th>';
+              }).join('')+
+            '</tr></thead>'+
+            '<tbody>'+rows+'</tbody>'+
+          '</table>'+
+        '</div>'+
+      '</div>';
+  });
+
+  // 2-column grid
+  con.innerHTML=
+    '<div style="font-size:11px;color:var(--text3);margin-bottom:10px">'+
+      machines.length+' machine(s) · '+all.length+' entries'+
+      (state.wMonth?' · Month: '+state.wMonth:state.wFrom?' · '+_dmFmtDate(state.wFrom)+' to '+_dmFmtDate(state.wTo):'')+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;align-items:start">'+
+      cards+
+    '</div>';
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+// ADD/EDIT FORM — Extended with all 23 template columns
+// ═══════════════════════════════════════════════════════════════════════
 
 function renderDeptWastageTab(tc,dept){
   const data=getMonthData(dept);
@@ -14437,7 +15154,13 @@ debugLog('ok','Auto sync patch loaded','Dashboard will render immediately and re
     const approvalDT2  = toNum(val(row,['APPROVAL_DOWNTIME_MIN','APPROVAL_DOWNTIME'],row.approvalDT||0));
     // Available = Total − Tech DT − Planning DT − Unplanned DT − Process DT − Approval DT
     const availableMin = totalJobTime - technicalDT - planningDT - unplannedDT2 - processDT2 - approvalDT2;
-    if(pmin>0 && availableMin>0) return (pmin / availableMin) * 100;
+    // OEE = Avail% × Perf% / 100  (Perf% = EE%)
+    if(availableMin>0){
+      const _avp = pmin/availableMin*100;
+      const _ee  = toNum(val(row,['EE_PCT','ee','EE'],0));
+      if(_ee>0) return (_avp * _ee) / 100;
+      return _avp; // fallback: just availability if no EE
+    }
     return toPct(val(row,['OEE_PCT','OEE'],row.oee||0));
   }
   function productionNormalize(r, tab){
